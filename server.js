@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3001;
 const TILE = 32;
 const MAP_W = 30, MAP_H = 22;
 const ROUND_TIME = 120;
-const TICK_RATE = 30; // 30 updates per second (~33ms)
+const TICK_RATE = 45; // 45 updates per second (~22ms)
 const EGG_SPAWN_INTERVAL = 3;  // seconds
 const ITEM_SPAWN_INTERVAL = 8;
 const MAX_EGGS = 25;
