@@ -223,7 +223,10 @@ function startRoomTick(code) {
         confused: p.confusionTimer > 0,
       };
     });
-    io.to(code).emit('state', state);
+    // Send to each player individually with their own socketId
+    Object.keys(room.players).forEach(sid => {
+      io.to(sid).emit('state', { ...state, myId: sid });
+    });
 
   }, 1000 / TICK_RATE);
 }
