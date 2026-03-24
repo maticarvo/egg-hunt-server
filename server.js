@@ -17,7 +17,7 @@ const EGG_SPAWN_INTERVAL = 3;  // seconds
 const ITEM_SPAWN_INTERVAL = 8;
 const MAX_EGGS = 25;
 const MAX_ITEMS = 4;
-const ITEM_TYPES = ['cage','fake_egg','speed','steal','magnet','confusion','shield'];
+const ITEM_TYPES = ['cage','fake_egg','speed','steal','magnet','confusion','shield','bomb_egg'];
 const SPAWN_POINTS = [{x:2,y:2},{x:MAP_W-3,y:2},{x:2,y:MAP_H-3},{x:MAP_W-3,y:MAP_H-3}];
 const ITEM_DURATION = {cage:3000,speed:4000,magnet:5000,confusion:3000};
 
@@ -467,6 +467,40 @@ io.on('connection', (socket) => {
       case 'shield':
         p.shield = true;
         io.to(socket.id).emit('effect', { type: 'shield-active' });
+        break;
+      case 'bomb_egg':
+        // Place a bomb egg at current position - explodes after 2s, launches nearby players
+        const bombId = 'b' + room.eggIdCounter++;
+        const bombX = p.x + 10, bombY = p.y + 12;
+        room.eggs.push({ id: bombId, x: bombX, y: bombY, type: 'bomb', active: true, placedBy: socket.id, timer: 2000 });
+        io.to(socket.id).emit('effect', { type: 'bomb-placed' });
+        // Explode after 2 seconds
+        setTimeout(() => {
+          const egg = room.eggs.find(e => e.id === bombId);
+          if (!egg || !egg.active) return;
+          egg.active = false;
+          // Launch all players in radius (including placer)
+          const BLAST_RADIUS = 100;
+          const LAUNCH_FORCE = 200;
+          Object.entries(room.players).forEach(([sid2, p2]) => {
+            const dist = Math.hypot(p2.x + 10 - bombX, p2.y + 12 - bombY);
+            if (dist < BLAST_RADIUS) {
+              const angle = Math.atan2(p2.y + 12 - bombY, p2.x + 10 - bombX);
+              const force = LAUNCH_FORCE * (1 - dist / BLAST_RADIUS);
+              p2.x += Math.cos(angle) * force;
+              p2.y += Math.sin(angle) * force;
+              // Clamp to map
+              p2.x = Math.max(TILE, Math.min(p2.x, (MAP_W - 1) * TILE - 20));
+              p2.y = Math.max(TILE, Math.min(p2.y, (MAP_H - 1) * TILE - 24));
+              p2.stunned = 1000;
+              io.to(sid2).emit('effect', { type: 'bomb-hit', angle, force });
+            }
+          });
+          // Notify all in room about explosion
+          Object.keys(room.players).forEach(sid2 => {
+            io.to(sid2).emit('effect', { type: 'bomb-explode', x: bombX, y: bombY });
+          });
+        }, 2000);
         break;
     }
   });
