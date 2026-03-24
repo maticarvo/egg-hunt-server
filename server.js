@@ -388,13 +388,8 @@ io.on('connection', (socket) => {
     if (!currentRoom || !rooms[currentRoom]) return;
     const player = rooms[currentRoom].players[socket.id];
     if (!player || player.stunned > 0 || player.caged > 0) return;
-    // Validate position (basic anti-cheat)
-    const dx = data.x - player.x, dy = data.y - player.y;
-    const maxMove = 6 * player.speedMult; // allow some tolerance
-    if (Math.abs(dx) <= maxMove && Math.abs(dy) <= maxMove) {
-      player.x = data.x;
-      player.y = data.y;
-    }
+    player.x = data.x;
+    player.y = data.y;
     player.dir = data.dir;
     player.moving = data.moving;
   });
