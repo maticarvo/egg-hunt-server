@@ -147,6 +147,7 @@ function startRoomTick(code) {
       if (p.stunned > 0 || p.caged > 0) return;
       room.eggs.forEach(egg => {
         if (!egg.active) return;
+        if (egg.type === 'fake' && egg.placedBy === sid) return; // don't hit your own fake egg
         const dist = Math.hypot(p.x + 10 - egg.x, p.y + 12 - egg.y);
         if (dist < 20) {
           egg.active = false;
