@@ -142,6 +142,9 @@ function startRoomTick(code) {
       }
     }
 
+    // Update bots
+    updateBots(room, dt);
+
     // Check egg pickups
     Object.entries(room.players).forEach(([sid, p]) => {
       if (p.stunned > 0 || p.caged > 0) return;
@@ -153,11 +156,11 @@ function startRoomTick(code) {
           egg.active = false;
           if (egg.type === 'fake') {
             p.stunned = 2000;
-            io.to(sid).emit('effect', { type: 'stunned', duration: 2000 });
+            if (!p.isBot) io.to(sid).emit('effect', { type: 'stunned', duration: 2000 });
           } else {
             const pts = egg.type === 'golden' ? 3 : 1;
             p.score += pts;
-            io.to(sid).emit('egg-collected', { type: egg.type, points: pts });
+            if (!p.isBot) io.to(sid).emit('egg-collected', { type: egg.type, points: pts });
           }
         }
       });
@@ -169,7 +172,7 @@ function startRoomTick(code) {
         if (dist < 22) {
           item.active = false;
           p.item = item.type;
-          io.to(sid).emit('item-collected', { type: item.type });
+          if (!p.isBot) io.to(sid).emit('item-collected', { type: item.type });
         }
       });
 
@@ -226,6 +229,7 @@ function startRoomTick(code) {
     });
     // Send to each player individually with their own socketId
     Object.keys(room.players).forEach(sid => {
+      if (room.players[sid].isBot) return;
       io.to(sid).emit('state', { ...state, myId: sid });
     });
 
@@ -331,9 +335,165 @@ function endRound(code) {
   }
 }
 
+// ============ BOT AI ============
+const BOT_NAMES = ['🤖 Robo', '🤖 Turbo', '🤖 Pixel', '🤖 Sparky', '🤖 Zigzag', '🤖 Blip'];
+const BOT_SPEED = 2.5;
+
+function addBots(code, count) {
+  const room = rooms[code];
+  if (!room) return;
+  for (let i = 0; i < count; i++) {
+    const botId = 'bot_' + i + '_' + Date.now();
+    const colorIdx = Object.keys(room.players).length;
+    const name = BOT_NAMES[i % BOT_NAMES.length];
+    room.players[botId] = createPlayer(name, botId, colorIdx);
+    room.players[botId].isBot = true;
+    room.players[botId].botTarget = null;
+    room.players[botId].botItemTimer = 0;
+    room.players[botId].botDirTimer = 0;
+    room.players[botId].ready = true;
+    room.playerOrder.push(botId);
+  }
+}
+
+function updateBots(room, dt) {
+  Object.entries(room.players).forEach(([sid, p]) => {
+    if (!p.isBot) return;
+    if (p.stunned > 0 || p.caged > 0) return;
+
+    // Find nearest active egg
+    let nearestEgg = null, nearestDist = Infinity;
+    room.eggs.forEach(egg => {
+      if (!egg.active) return;
+      if (egg.type === 'fake' || egg.type === 'bomb') return;
+      const dist = Math.hypot(p.x + 10 - egg.x, p.y + 12 - egg.y);
+      if (dist < nearestDist) { nearestDist = dist; nearestEgg = egg; }
+    });
+
+    // Move towards nearest egg
+    if (nearestEgg) {
+      const dx = nearestEgg.x - (p.x + 10);
+      const dy = nearestEgg.y - (p.y + 12);
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist > 5) {
+        const nx = dx / dist;
+        const ny = dy / dist;
+        const speed = BOT_SPEED * p.speedMult;
+        const newX = p.x + nx * speed;
+        const newY = p.y + ny * speed;
+        // Basic boundary check
+        p.x = Math.max(TILE, Math.min(newX, (MAP_W-1)*TILE - 20));
+        p.y = Math.max(TILE, Math.min(newY, (MAP_H-1)*TILE - 24));
+        p.moving = true;
+        if (Math.abs(nx) > Math.abs(ny)) p.dir = nx > 0 ? 'right' : 'left';
+        else p.dir = ny > 0 ? 'down' : 'up';
+      }
+    } else {
+      // No eggs, wander randomly
+      p.botDirTimer -= dt;
+      if (p.botDirTimer <= 0) {
+        p.botDirTimer = 1000 + Math.random() * 2000;
+        p.dir = ['up','down','left','right'][Math.floor(Math.random()*4)];
+      }
+      const speed = BOT_SPEED * 0.5;
+      switch(p.dir) {
+        case 'up': p.y = Math.max(TILE, p.y - speed); break;
+        case 'down': p.y = Math.min((MAP_H-1)*TILE - 24, p.y + speed); break;
+        case 'left': p.x = Math.max(TILE, p.x - speed); break;
+        case 'right': p.x = Math.min((MAP_W-1)*TILE - 20, p.x + speed); break;
+      }
+      p.moving = true;
+    }
+
+    // Use items randomly
+    if (p.item) {
+      p.botItemTimer -= dt;
+      if (p.botItemTimer <= 0) {
+        p.botItemTimer = 2000 + Math.random() * 4000;
+        // Find nearest human player for targeted items
+        let nearestPlayer = null, npDist = Infinity;
+        Object.entries(room.players).forEach(([sid2, p2]) => {
+          if (sid2 === sid || p2.isBot) return;
+          const d = Math.hypot(p.x - p2.x, p.y - p2.y);
+          if (d < npDist) { npDist = d; nearestPlayer = {sid: sid2, p: p2}; }
+        });
+
+        switch(p.item) {
+          case 'speed': p.speedMult = 2; break;
+          case 'shield': p.shield = true; break;
+          case 'magnet': p.magnetTimer = 5000; break;
+          case 'cage':
+            if (nearestPlayer && npDist < 150) {
+              if (nearestPlayer.p.shield) { nearestPlayer.p.shield = false; }
+              else { nearestPlayer.p.caged = 3000; io.to(nearestPlayer.sid).emit('effect', {type:'caged', by: p.name}); }
+            }
+            break;
+          case 'confusion':
+            Object.entries(room.players).forEach(([sid2, p2]) => {
+              if (sid2 === sid) return;
+              if (p2.shield) { p2.shield = false; }
+              else { p2.confusionTimer = 3000; if (!p2.isBot) io.to(sid2).emit('effect', {type:'confused', by: p.name}); }
+            });
+            break;
+          case 'fake_egg':
+            room.eggs.push({id:'e'+room.eggIdCounter++, x:p.x+10, y:p.y+12, type:'fake', active:true, placedBy:sid});
+            break;
+          case 'steal':
+            if (nearestPlayer && npDist < 50) {
+              const stolen = Math.min(2, nearestPlayer.p.score);
+              p.score += stolen; nearestPlayer.p.score -= stolen;
+              io.to(nearestPlayer.sid).emit('effect', {type:'steal-victim', thief:p.name, amount:stolen});
+            }
+            break;
+          case 'bomb_egg':
+            const bx = p.x+10, by = p.y+12;
+            room.eggs.push({id:'b'+room.eggIdCounter++, x:bx, y:by, type:'bomb', active:true, placedBy:sid, timer:2000});
+            setTimeout(() => {
+              const bomb = room.eggs.find(e => e.x === bx && e.y === by && e.type === 'bomb' && e.active);
+              if (!bomb) return;
+              bomb.active = false;
+              Object.entries(room.players).forEach(([sid2, p2]) => {
+                const d = Math.hypot(p2.x+10-bx, p2.y+12-by);
+                if (d < 100) {
+                  const a = Math.atan2(p2.y+12-by, p2.x+10-bx);
+                  const f = 200*(1-d/100);
+                  p2.x += Math.cos(a)*f; p2.y += Math.sin(a)*f;
+                  p2.x = Math.max(TILE, Math.min(p2.x, (MAP_W-1)*TILE-20));
+                  p2.y = Math.max(TILE, Math.min(p2.y, (MAP_H-1)*TILE-24));
+                  p2.stunned = 1000;
+                  if (!p2.isBot) io.to(sid2).emit('effect', {type:'bomb-hit', angle:a, force:f});
+                }
+              });
+              Object.keys(room.players).forEach(sid2 => {
+                if (!room.players[sid2].isBot) io.to(sid2).emit('effect', {type:'bomb-explode', x:bx, y:by});
+              });
+            }, 2000);
+            break;
+        }
+        p.item = null;
+      }
+    }
+  });
+}
+
 // ============ SOCKET HANDLERS ============
 io.on('connection', (socket) => {
   let currentRoom = null;
+
+  socket.on('start-solo', ({ name, uid, rounds }, cb) => {
+    const code = Math.random().toString(36).substring(2, 6).toUpperCase();
+    rooms[code] = createRoom(code);
+    rooms[code].host = socket.id;
+    rooms[code].settings.rounds = rounds || 3;
+    rooms[code].players[socket.id] = createPlayer(name, uid, 0);
+    rooms[code].playerOrder.push(socket.id);
+    socket.join(code);
+    currentRoom = code;
+    // Add 3 bots
+    addBots(code, 3);
+    cb({ ok: true, code });
+    io.to(code).emit('room-update', getRoomLobbyData(code));
+  });
 
   socket.on('create-room', ({ name, uid }, cb) => {
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
