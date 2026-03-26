@@ -87,22 +87,31 @@ function createPlayer(name, uid, colorIdx) {
 }
 
 // ============ EGG SPAWNING ============
-const EGG_COLORS = ['#ff69b4','#87ceeb','#98fb98','#dda0dd','#f0e68c','#ffa07a','#b0e0e6','#ffb6c1'];
+function findSpotNoOverlap(existingEggs, minDist) {
+  for (let i = 0; i < 100; i++) {
+    const tx = 2 + Math.floor(Math.random() * (MAP_W - 4));
+    const ty = 2 + Math.floor(Math.random() * (MAP_H - 4));
+    if (mapObjects[ty][tx] || mapGround[ty][tx] === 'water') continue;
+    const px = tx * TILE + TILE / 2, py = ty * TILE + TILE / 2;
+    const tooClose = existingEggs.some(e => Math.hypot(e.x - px, e.y - py) < minDist);
+    if (!tooClose) return { x: px, y: py };
+  }
+  return findSpot(); // fallback
+}
 
 function spawnEggs(room) {
   room.eggs = [];
   room.eggIdCounter = 0;
   const playerCount = Object.keys(room.players).length;
-  const totalEggs = playerCount * EGGS_PER_PLAYER + 1; // +1 golden for tiebreak
+  const totalEggs = playerCount * EGGS_PER_PLAYER + 1; // +1 tiebreaker, all worth 1
   for (let i = 0; i < totalEggs; i++) {
-    const pos = findSpot();
+    const pos = findSpotNoOverlap(room.eggs, 40);
     if (pos) {
-      const isGolden = i === totalEggs - 1;
       room.eggs.push({
         id: 'e' + room.eggIdCounter++,
         x: pos.x, y: pos.y,
-        colorIdx: isGolden ? -2 : (i % EGG_COLORS.length),
-        active: true, isGolden,
+        colorIdx: Math.floor(Math.random() * 8), // random color
+        active: true, isGolden: false,
       });
     }
   }
@@ -158,14 +167,10 @@ function startRoomTick(code) {
         if (dist < 22) {
           egg.active = false;
           p.collected++;
-          if (egg.isGolden && !p.isBot) {
-            io.to(sid).emit('effect', { type: 'golden-collected' });
-          }
           const eggsLeft = room.eggs.filter(e => e.active && !e.isBomb).length;
           if (!p.isBot) {
             io.to(sid).emit('egg-collected', {
               collected: p.collected, eggsLeft,
-              golden: !!egg.isGolden,
             });
           }
           // Round ends when last egg is grabbed
@@ -241,7 +246,7 @@ function startRoomTick(code) {
       players: {},
       eggs: room.eggs.filter(e => e.active).map(e => ({
         id: e.id, x: Math.round(e.x), y: Math.round(e.y),
-        colorIdx: e.colorIdx, isGolden: !!e.isGolden,
+        colorIdx: e.colorIdx,
       })),
       items: room.items.filter(i => i.active).map(i => ({
         id: i.id, x: Math.round(i.x), y: Math.round(i.y), type: i.type
