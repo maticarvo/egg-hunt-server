@@ -13,7 +13,7 @@ const TILE = 32;
 const MAP_W = 20, MAP_H = 15;
 const ROUND_TIME = 180; // 3 min max per round
 const TICK_RATE = 45;
-const EGGS_PER_PLAYER = 6;
+const EGGS_PER_PLAYER = 10;
 const ITEM_SPAWN_INTERVAL = 7;
 const MAX_ITEMS = 5;
 const ITEM_TYPES = ['cage','speed','steal','magnet','confusion','shield','bomb_egg','radar'];
