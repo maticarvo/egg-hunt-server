@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3001;
 
 // ============ CONFIG ============
 const TILE = 32;
-const MAP_W = 14, MAP_H = 10;
+const MAP_W = 18, MAP_H = 13;
 const ROUND_TIME = 180; // 3 min max per round
 const TICK_RATE = 45;
 const EGGS_PER_PLAYER = 10;
