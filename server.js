@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3001;
 
 // ============ CONFIG ============
 const TILE = 32;
-const MAP_W = 20, MAP_H = 15;
+const MAP_W = 14, MAP_H = 10;
 const ROUND_TIME = 180; // 3 min max per round
 const TICK_RATE = 45;
 const EGGS_PER_PLAYER = 10;
@@ -32,9 +32,8 @@ function initMap() {
   for(let y=1;y<MAP_H-1;y++){mapGround[y][MAP_W/2|0]='path';mapGround[y][(MAP_W/2|0)+1]='path';}
   const cx=MAP_W/2|0,cy=MAP_H/2|0;
   mapGround[cy][cx]='water';mapGround[cy][cx+1]='water';mapGround[cy+1][cx]='water';mapGround[cy+1][cx+1]='water';
-  const obs = [[3,3,'bush'],[3,8,'tree'],[3,16,'bush'],[5,5,'tree'],[5,14,'tree'],
-    [9,3,'bush'],[9,10,'bush'],[9,16,'bush'],[11,5,'tree'],[11,14,'tree'],
-    [6,9,'rock'],[6,10,'rock']];
+  const obs = [[3,3,'bush'],[3,10,'tree'],[5,6,'rock'],[5,7,'rock'],
+    [7,3,'tree'],[7,10,'bush']];
   obs.forEach(([y,x,t])=>{if(y<MAP_H&&x<MAP_W)mapObjects[y][x]=t;});
 }
 initMap();
