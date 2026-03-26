@@ -377,7 +377,7 @@ function endRound(code, winnerSid) {
 }
 
 // ============ BOT AI ============
-const BOT_NAMES = ['🤖 Robo', '🤖 Turbo', '🤖 Pixel', '🤖 Sparky'];
+const BOT_NAMES = ['Sra. Mirta', 'Don Simón', "Ma'am Pamela"];
 const BOT_SPEED = 2.5;
 
 function addBots(code, count) {
