@@ -10,14 +10,14 @@ const PORT = process.env.PORT || 3001;
 
 // ============ CONFIG ============
 const TILE = 32;
-const MAP_W = 30, MAP_H = 22;
+const MAP_W = 20, MAP_H = 15;
 const ROUND_TIME = 180; // 3 min max per round
 const TICK_RATE = 45;
 const EGGS_PER_PLAYER = 6;
 const ITEM_SPAWN_INTERVAL = 7;
 const MAX_ITEMS = 5;
 const ITEM_TYPES = ['cage','speed','steal','magnet','confusion','shield','bomb_egg','radar'];
-const SPAWN_POINTS = [{x:2,y:2},{x:MAP_W-3,y:2},{x:2,y:MAP_H-3},{x:MAP_W-3,y:MAP_H-3}];
+const SPAWN_POINTS = [{x:2,y:2},{x:MAP_W-3,y:2},{x:2,y:MAP_H-3},{x:MAP_W-3,y:MAP_H-3}]; // corners
 const ITEM_DURATION = {cage:3000,speed:4000,magnet:6000,confusion:3000};
 const COLORS = ['#3498db','#e74c3c','#2ecc71','#f1c40f'];
 
@@ -32,9 +32,9 @@ function initMap() {
   for(let y=1;y<MAP_H-1;y++){mapGround[y][MAP_W/2|0]='path';mapGround[y][(MAP_W/2|0)+1]='path';}
   const cx=MAP_W/2|0,cy=MAP_H/2|0;
   mapGround[cy][cx]='water';mapGround[cy][cx+1]='water';mapGround[cy+1][cx]='water';mapGround[cy+1][cx+1]='water';
-  const obs = [[4,4,'bush'],[4,8,'tree'],[4,13,'tree'],[4,17,'bush'],[8,3,'bush'],[8,7,'bush'],[8,14,'bush'],[8,18,'bush'],
-    [13,4,'bush'],[13,8,'bush'],[13,13,'bush'],[13,17,'bush'],[7,5,'tree'],[7,16,'tree'],[14,5,'tree'],[14,16,'tree'],
-    [3,10,'bush'],[18,10,'bush'],[3,11,'bush'],[18,11,'bush'],[10,3,'rock'],[10,18,'rock'],[11,3,'rock'],[11,18,'rock']];
+  const obs = [[3,3,'bush'],[3,8,'tree'],[3,16,'bush'],[5,5,'tree'],[5,14,'tree'],
+    [9,3,'bush'],[9,10,'bush'],[9,16,'bush'],[11,5,'tree'],[11,14,'tree'],
+    [6,9,'rock'],[6,10,'rock']];
   obs.forEach(([y,x,t])=>{if(y<MAP_H&&x<MAP_W)mapObjects[y][x]=t;});
 }
 initMap();
