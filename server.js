@@ -26,15 +26,11 @@ const mapObjects = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill(null));
 const mapGround = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill('grass'));
 
 function initMap() {
+  // Fence border (walls)
   for(let x=0;x<MAP_W;x++){mapObjects[0][x]='fence';mapObjects[MAP_H-1][x]='fence';}
   for(let y=0;y<MAP_H;y++){mapObjects[y][0]='fence';mapObjects[y][MAP_W-1]='fence';}
-  for(let x=1;x<MAP_W-1;x++){mapGround[MAP_H/2|0][x]='path';mapGround[(MAP_H/2|0)+1][x]='path';}
-  for(let y=1;y<MAP_H-1;y++){mapGround[y][MAP_W/2|0]='path';mapGround[y][(MAP_W/2|0)+1]='path';}
-  const cx=MAP_W/2|0,cy=MAP_H/2|0;
-  mapGround[cy][cx]='water';mapGround[cy][cx+1]='water';mapGround[cy+1][cx]='water';mapGround[cy+1][cx+1]='water';
-  const obs = [[3,3,'bush'],[3,10,'tree'],[5,6,'rock'],[5,7,'rock'],
-    [7,3,'tree'],[7,10,'bush']];
-  obs.forEach(([y,x,t])=>{if(y<MAP_H&&x<MAP_W)mapObjects[y][x]=t;});
+  // All cement floor
+  for(let y=1;y<MAP_H-1;y++) for(let x=1;x<MAP_W-1;x++) mapGround[y][x]='cement';
 }
 initMap();
 
@@ -87,15 +83,18 @@ function createPlayer(name, uid, colorIdx) {
 
 // ============ EGG SPAWNING ============
 function findSpotNoOverlap(existingEggs, minDist) {
-  for (let i = 0; i < 100; i++) {
-    const tx = 2 + Math.floor(Math.random() * (MAP_W - 4));
-    const ty = 2 + Math.floor(Math.random() * (MAP_H - 4));
-    if (mapObjects[ty][tx] || mapGround[ty][tx] === 'water') continue;
-    const px = tx * TILE + TILE / 2, py = ty * TILE + TILE / 2;
+  for (let i = 0; i < 200; i++) {
+    // Use full map area (inside fence)
+    const px = TILE + Math.random() * ((MAP_W - 2) * TILE);
+    const py = TILE + Math.random() * ((MAP_H - 2) * TILE);
+    const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+    if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) continue;
+    if (mapObjects[ty][tx]) continue;
     const tooClose = existingEggs.some(e => Math.hypot(e.x - px, e.y - py) < minDist);
     if (!tooClose) return { x: px, y: py };
   }
-  return findSpot(); // fallback
+  // Fallback: just find any open spot
+  return findSpot();
 }
 
 function spawnEggs(room) {
