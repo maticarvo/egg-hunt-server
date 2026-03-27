@@ -55,6 +55,7 @@ const rooms = {};
 function createRoom(code) {
   return {
     code, host: null, state: 'lobby',
+    isPublic: false,
     settings: { rounds: 3 },
     round: 0, timer: ROUND_TIME,
     players: {}, playerOrder: [],
@@ -506,6 +507,64 @@ function updateBots(room, dt) {
 io.on('connection', (socket) => {
   let currentRoom = null;
 
+  // ---- Public lobby browsing ----
+  socket.on('join-public-lobby', () => {
+    socket.join('public-lobby');
+    socket.emit('public-rooms', getPublicRoomsList());
+  });
+
+  socket.on('leave-public-lobby', () => {
+    socket.leave('public-lobby');
+  });
+
+  socket.on('create-public', ({ name, uid }, cb) => {
+    const code = Math.random().toString(36).substring(2,6).toUpperCase();
+    rooms[code] = createRoom(code);
+    rooms[code].host = socket.id;
+    rooms[code].isPublic = true;
+    rooms[code].players[socket.id] = createPlayer(name, uid, 0);
+    rooms[code].playerOrder.push(socket.id);
+    socket.join(code);
+    socket.leave('public-lobby');
+    currentRoom = code;
+    cb({ ok: true, code });
+    io.to(code).emit('room-update', getRoomLobbyData(code));
+    broadcastPublicRooms();
+  });
+
+  socket.on('quick-play', ({ name, uid }, cb) => {
+    // Find a public room with space
+    const available = Object.values(rooms).find(r =>
+      r.isPublic && r.state === 'lobby' &&
+      Object.values(r.players).filter(p => !p.isBot && p.connected).length < 4
+    );
+    if (available) {
+      const count = Object.keys(available.players).length;
+      available.players[socket.id] = createPlayer(name, uid, count);
+      available.playerOrder.push(socket.id);
+      socket.join(available.code);
+      socket.leave('public-lobby');
+      currentRoom = available.code;
+      cb({ ok: true, code: available.code });
+      io.to(available.code).emit('room-update', getRoomLobbyData(available.code));
+      broadcastPublicRooms();
+    } else {
+      // No rooms available, create one
+      const code = Math.random().toString(36).substring(2,6).toUpperCase();
+      rooms[code] = createRoom(code);
+      rooms[code].host = socket.id;
+      rooms[code].isPublic = true;
+      rooms[code].players[socket.id] = createPlayer(name, uid, 0);
+      rooms[code].playerOrder.push(socket.id);
+      socket.join(code);
+      socket.leave('public-lobby');
+      currentRoom = code;
+      cb({ ok: true, code, created: true });
+      io.to(code).emit('room-update', getRoomLobbyData(code));
+      broadcastPublicRooms();
+    }
+  });
+
   socket.on('start-solo', ({ name, uid, rounds }, cb) => {
     const code = Math.random().toString(36).substring(2,6).toUpperCase();
     rooms[code] = createRoom(code);
@@ -536,14 +595,17 @@ io.on('connection', (socket) => {
     const room = rooms[code];
     if (!room) { cb({ok:false,error:'Sala no encontrada'}); return; }
     if (room.state !== 'lobby') { cb({ok:false,error:'Partida en curso'}); return; }
+    const humanCount = Object.values(room.players).filter(p => !p.isBot && p.connected).length;
+    if (humanCount >= 4) { cb({ok:false,error:'Sala llena'}); return; }
     const count = Object.keys(room.players).length;
-    if (count >= 4) { cb({ok:false,error:'Sala llena'}); return; }
     room.players[socket.id] = createPlayer(name, uid, count);
     room.playerOrder.push(socket.id);
     socket.join(code);
+    socket.leave('public-lobby');
     currentRoom = code;
     cb({ ok: true, code });
     io.to(code).emit('room-update', getRoomLobbyData(code));
+    if (room.isPublic) broadcastPublicRooms();
   });
 
   socket.on('ready', () => {
@@ -688,16 +750,19 @@ io.on('connection', (socket) => {
   function leaveCurrentRoom(sock) {
     if (!currentRoom || !rooms[currentRoom]) return;
     const room = rooms[currentRoom];
+    const wasPublic = room.isPublic;
     delete room.players[sock.id];
     room.playerOrder = room.playerOrder.filter(s => s !== sock.id);
     sock.leave(currentRoom);
-    if (Object.keys(room.players).length === 0) {
+    const remaining = Object.values(room.players).filter(p => !p.isBot);
+    if (remaining.length === 0) {
       stopRoomTick(currentRoom); delete rooms[currentRoom];
     } else {
-      if (room.host === sock.id) room.host = Object.keys(room.players)[0];
+      if (room.host === sock.id) room.host = Object.keys(room.players).find(s => !room.players[s].isBot) || Object.keys(room.players)[0];
       io.to(currentRoom).emit('room-update', getRoomLobbyData(currentRoom));
     }
     currentRoom = null;
+    if (wasPublic) broadcastPublicRooms();
   }
 });
 
@@ -708,7 +773,27 @@ function getRoomLobbyData(code) {
   Object.entries(room.players).forEach(([sid, p]) => {
     players[sid] = { uid: p.uid, name: p.name, colorIdx: p.colorIdx, ready: p.ready, connected: p.connected };
   });
-  return { code: room.code, state: room.state, host: room.host, settings: room.settings, players };
+  return { code: room.code, state: room.state, host: room.host, settings: room.settings, players, isPublic: room.isPublic };
+}
+
+function getPublicRoomsList() {
+  return Object.values(rooms)
+    .filter(r => r.isPublic && r.state === 'lobby')
+    .map(r => {
+      const humanCount = Object.values(r.players).filter(p => !p.isBot && p.connected).length;
+      const hostPlayer = r.players[r.host];
+      return {
+        code: r.code,
+        hostName: hostPlayer?.name || '???',
+        players: humanCount,
+        maxPlayers: 4,
+        rounds: r.settings.rounds,
+      };
+    });
+}
+
+function broadcastPublicRooms() {
+  io.to('public-lobby').emit('public-rooms', getPublicRoomsList());
 }
 
 app.get('/', (req, res) => res.json({ status: 'ok', rooms: Object.keys(rooms).length }));
