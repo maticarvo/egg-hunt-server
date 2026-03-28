@@ -21,30 +21,92 @@ const SPAWN_POINTS = [{x:2,y:2},{x:MAP_W-3,y:2},{x:2,y:MAP_H-3},{x:MAP_W-3,y:MAP
 const ITEM_DURATION = {cage:3000,speed:4000,magnet:6000,confusion:3000};
 const COLORS = ['#3498db','#e74c3c','#2ecc71','#f1c40f'];
 
-// ============ MAP ============
-const mapObjects = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill(null));
-const mapGround = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill('grass'));
+// ============ MAPS ============
+const SOLID = ['fence','wall','tree','rock','kiosk','bush'];
 
-function initMap() {
-  // Fence border (walls)
-  for(let x=0;x<MAP_W;x++){mapObjects[0][x]='fence';mapObjects[MAP_H-1][x]='fence';}
-  for(let y=0;y<MAP_H;y++){mapObjects[y][0]='fence';mapObjects[y][MAP_W-1]='fence';}
-  // All cement floor
-  for(let y=1;y<MAP_H-1;y++) for(let x=1;x<MAP_W-1;x++) mapGround[y][x]='cement';
+const MAPS = {
+  patio: {
+    name: 'Patio del Colegio',
+    icon: '🏫',
+    build: () => {
+      const g = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill('cement'));
+      const o = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill(null));
+      // Muro edificio arriba y izquierda
+      for(let x=0;x<MAP_W;x++) o[0][x]='wall';
+      for(let y=0;y<MAP_H;y++) o[y][0]='wall';
+      // Reja abajo y derecha
+      for(let x=0;x<MAP_W;x++) o[MAP_H-1][x]='fence';
+      for(let y=0;y<MAP_H;y++) o[y][MAP_W-1]='fence';
+      // Piso ondulado decorativo en zonas
+      for(let y=1;y<MAP_H-1;y++) for(let x=1;x<MAP_W-1;x++)
+        g[y][x] = ((x+y)%7===0) ? 'cement_wave' : 'cement';
+      // Árboles grandes (como en la foto)
+      [[3,4],[3,5],[7,3],[7,4],[5,13],[5,14],[10,10]].forEach(([y,x])=>{
+        if(y<MAP_H-1&&x<MAP_W-1) o[y][x]='tree';
+      });
+      // Kiosco (esquina inferior izquierda)
+      o[9][2]='kiosk'; o[9][3]='kiosk';
+      o[10][2]='kiosk'; o[10][3]='kiosk';
+      // Bancas (decorativas, no sólidas)
+      g[6][8]='bench'; g[6][10]='bench';
+      // Pasto en bordes del patio
+      for(let x=1;x<5;x++) { g[MAP_H-2][x]='grass'; g[MAP_H-3][x]='grass'; }
+      return {ground:g, objects:o};
+    }
+  },
+  cemento: {
+    name: 'Cancha',
+    icon: '🏟️',
+    build: () => {
+      const g = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill('cement'));
+      const o = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill(null));
+      for(let x=0;x<MAP_W;x++){o[0][x]='fence';o[MAP_H-1][x]='fence';}
+      for(let y=0;y<MAP_H;y++){o[y][0]='fence';o[y][MAP_W-1]='fence';}
+      return {ground:g, objects:o};
+    }
+  },
+  jardin: {
+    name: 'Jardín',
+    icon: '🌳',
+    build: () => {
+      const g = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill('grass'));
+      const o = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill(null));
+      for(let x=0;x<MAP_W;x++){o[0][x]='fence';o[MAP_H-1][x]='fence';}
+      for(let y=0;y<MAP_H;y++){o[y][0]='fence';o[y][MAP_W-1]='fence';}
+      // Camino central
+      for(let x=1;x<MAP_W-1;x++) g[MAP_H/2|0][x]='path';
+      for(let y=1;y<MAP_H-1;y++) g[y][MAP_W/2|0]='path';
+      // Árboles y arbustos
+      [[2,3,'tree'],[2,14,'tree'],[4,7,'bush'],[4,10,'bush'],
+       [8,3,'tree'],[8,14,'tree'],[10,7,'bush'],[10,10,'bush'],
+       [6,2,'bush'],[6,15,'bush']].forEach(([y,x,t])=>{
+        if(y<MAP_H-1&&x<MAP_W-1) o[y][x]=t;
+      });
+      // Lago
+      g[5][8]='water';g[5][9]='water';g[6][8]='water';g[6][9]='water';
+      // Flores
+      for(let y=1;y<MAP_H-1;y++) for(let x=1;x<MAP_W-1;x++)
+        if(g[y][x]==='grass'&&((x*13+y*7)%17===0)) g[y][x]='flowers';
+      return {ground:g, objects:o};
+    }
+  },
+};
+const MAP_IDS = Object.keys(MAPS);
+
+function buildMap(mapId) {
+  const map = MAPS[mapId] || MAPS.patio;
+  return map.build();
 }
-initMap();
-
-const SOLID = ['fence','bush','tree','rock'];
-function isSolid(wx,wy) {
+function isSolidInMap(objects, ground, wx, wy) {
   const tx=Math.floor(wx/TILE),ty=Math.floor(wy/TILE);
-  if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)return true;
-  return SOLID.includes(mapObjects[ty]?.[tx]) || mapGround[ty]?.[tx]==='water';
+  if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H) return true;
+  return SOLID.includes(objects[ty]?.[tx]) || ground[ty]?.[tx]==='water';
 }
 
-function findSpot() {
-  for(let i=0;i<50;i++){
+function findSpotInMap(objects, ground) {
+  for(let i=0;i<100;i++){
     const tx=2+Math.floor(Math.random()*(MAP_W-4)),ty=2+Math.floor(Math.random()*(MAP_H-4));
-    if(!mapObjects[ty][tx]&&mapGround[ty][tx]!=='water') return {x:tx*TILE+TILE/2,y:ty*TILE+TILE/2};
+    if(!objects[ty][tx]&&ground[ty][tx]!=='water') return {x:tx*TILE+TILE/2,y:ty*TILE+TILE/2};
   }
   return null;
 }
@@ -56,7 +118,8 @@ function createRoom(code) {
   return {
     code, host: null, state: 'lobby',
     isPublic: false,
-    settings: { rounds: 3 },
+    settings: { rounds: 3, mapId: 'patio' },
+    mapGround: null, mapObjects: null,
     round: 0, timer: ROUND_TIME,
     players: {}, playerOrder: [],
     eggs: [], items: [],
@@ -83,19 +146,18 @@ function createPlayer(name, uid, colorIdx) {
 }
 
 // ============ EGG SPAWNING ============
-function findSpotNoOverlap(existingEggs, minDist) {
+function findSpotNoOverlap(room, existingEggs, minDist) {
   for (let i = 0; i < 200; i++) {
-    // Use full map area (inside fence)
     const px = TILE + Math.random() * ((MAP_W - 2) * TILE);
     const py = TILE + Math.random() * ((MAP_H - 2) * TILE);
     const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
     if (tx < 1 || ty < 1 || tx >= MAP_W - 1 || ty >= MAP_H - 1) continue;
-    if (mapObjects[ty][tx]) continue;
+    if (room.mapObjects[ty][tx]) continue;
+    if (room.mapGround[ty][tx] === 'water') continue;
     const tooClose = existingEggs.some(e => Math.hypot(e.x - px, e.y - py) < minDist);
     if (!tooClose) return { x: px, y: py };
   }
-  // Fallback: just find any open spot
-  return findSpot();
+  return findSpotInMap(room.mapObjects, room.mapGround);
 }
 
 function spawnEggs(room) {
@@ -104,7 +166,7 @@ function spawnEggs(room) {
   const playerCount = Object.keys(room.players).length;
   const totalEggs = playerCount * EGGS_PER_PLAYER + 1; // +1 tiebreaker, all worth 1
   for (let i = 0; i < totalEggs; i++) {
-    const pos = findSpotNoOverlap(room.eggs, 40);
+    const pos = findSpotNoOverlap(room, room.eggs, 40);
     if (pos) {
       room.eggs.push({
         id: 'e' + room.eggIdCounter++,
@@ -145,7 +207,7 @@ function startRoomTick(code) {
       room.itemSpawnTimer = 0;
       const activeItems = room.items.filter(i => i.active).length;
       if (activeItems < MAX_ITEMS) {
-        const pos = findSpot();
+        const pos = findSpotInMap(room.mapObjects, room.mapGround);
         if (pos) {
           const type = ITEM_TYPES[Math.floor(Math.random() * ITEM_TYPES.length)];
           room.items.push({ id: 'i' + room.itemIdCounter++, x: pos.x, y: pos.y, type, active: true });
@@ -227,7 +289,7 @@ function startRoomTick(code) {
             if (inactive.length > 0) {
               const egg = inactive[Math.floor(Math.random() * inactive.length)];
               egg.active = true;
-              const pos = findSpot();
+              const pos = findSpotInMap(room.mapObjects, room.mapGround);
               if (pos) { egg.x = pos.x; egg.y = pos.y; }
             }
             io.to(sid).emit('effect', { type: 'steal-success', victim: p2.name });
@@ -242,6 +304,9 @@ function startRoomTick(code) {
       timer: room.timer,
       round: room.round,
       totalRounds: room.settings.rounds,
+      mapId: room.settings.mapId,
+      mapGround: room.mapGround,
+      mapObjects: room.mapObjects,
       players: {},
       eggs: room.eggs.filter(e => e.active).map(e => ({
         id: e.id, x: Math.round(e.x), y: Math.round(e.y),
@@ -287,6 +352,11 @@ function startRound(code) {
   room.timer = ROUND_TIME;
   room.itemSpawnTimer = 0;
 
+  // Build map
+  const mapData = buildMap(room.settings.mapId || 'patio');
+  room.mapGround = mapData.ground;
+  room.mapObjects = mapData.objects;
+
   // Reset players
   const entries = Object.entries(room.players);
   entries.forEach(([sid, p], i) => {
@@ -306,7 +376,7 @@ function startRound(code) {
   room.items = [];
   room.itemIdCounter = 0;
   for (let i = 0; i < 3; i++) {
-    const pos = findSpot();
+    const pos = findSpotInMap(room.mapObjects, room.mapGround);
     if (pos) {
       const type = ITEM_TYPES[Math.floor(Math.random() * ITEM_TYPES.length)];
       room.items.push({ id: 'i' + room.itemIdCounter++, x: pos.x, y: pos.y, type, active: true });
@@ -629,6 +699,15 @@ io.on('connection', (socket) => {
     io.to(currentRoom).emit('room-update', getRoomLobbyData(currentRoom));
   });
 
+  socket.on('set-map', (mapId) => {
+    if (!currentRoom || !rooms[currentRoom]) return;
+    if (rooms[currentRoom].host !== socket.id) return;
+    if (MAPS[mapId]) {
+      rooms[currentRoom].settings.mapId = mapId;
+      io.to(currentRoom).emit('room-update', getRoomLobbyData(currentRoom));
+    }
+  });
+
   socket.on('move', (data) => {
     if (!currentRoom || !rooms[currentRoom]) return;
     const player = rooms[currentRoom].players[socket.id];
@@ -773,7 +852,8 @@ function getRoomLobbyData(code) {
   Object.entries(room.players).forEach(([sid, p]) => {
     players[sid] = { uid: p.uid, name: p.name, colorIdx: p.colorIdx, ready: p.ready, connected: p.connected };
   });
-  return { code: room.code, state: room.state, host: room.host, settings: room.settings, players, isPublic: room.isPublic };
+  const maps = MAP_IDS.map(id => ({id, name: MAPS[id].name, icon: MAPS[id].icon}));
+  return { code: room.code, state: room.state, host: room.host, settings: room.settings, players, isPublic: room.isPublic, maps };
 }
 
 function getPublicRoomsList() {
