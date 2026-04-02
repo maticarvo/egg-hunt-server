@@ -13,12 +13,12 @@ const TILE = 32;
 const MAP_W = 30, MAP_H = 22;
 const ROUND_TIME = 180; // 3 min max per round
 const TICK_RATE = 45;
-const EGGS_PER_PLAYER = 10;
-const ITEM_SPAWN_INTERVAL = 7;
-const MAX_ITEMS = 5;
-const ITEM_TYPES = ['cage','speed','steal','magnet','confusion','shield','bomb_egg','radar'];
+const EGGS_PER_PLAYER = 25;
+const ITEM_SPAWN_INTERVAL = 4;
+const MAX_ITEMS = 8;
+const ITEM_TYPES = ['tornado','rayo','terremoto','teletransporte','lluvia','fantasma'];
 const SPAWN_POINTS = [{x:2,y:2},{x:MAP_W-3,y:2},{x:2,y:MAP_H-3},{x:MAP_W-3,y:MAP_H-3}]; // corners
-const ITEM_DURATION = {cage:3000,speed:4000,magnet:6000,confusion:3000};
+const ITEM_DURATION = {};
 const COLORS = ['#3498db','#e74c3c','#2ecc71','#f1c40f'];
 
 // ============ MAPS ============
@@ -174,8 +174,7 @@ function createPlayer(name, uid, colorIdx) {
     collected: 0,
     item: null,
     stunned: 0, caged: 0, speedMult: 1,
-    shield: false, magnetTimer: 0, stealActive: false, confusionTimer: 0,
-    radarTimer: 0,
+    ghostTimer: 0,
     connected: true,
   };
 }
@@ -230,10 +229,8 @@ function startRoomTick(code) {
     Object.values(room.players).forEach(p => {
       if (p.stunned > 0) p.stunned -= dt;
       if (p.caged > 0) p.caged -= dt;
-      if (p.magnetTimer > 0) p.magnetTimer -= dt;
-      if (p.confusionTimer > 0) p.confusionTimer -= dt;
-      if (p.radarTimer > 0) p.radarTimer -= dt;
-      if (p.speedMult > 1) { p.speedMult -= dt/4000; if(p.speedMult<1) p.speedMult=1; }
+      if (p.ghostTimer > 0) p.ghostTimer -= dt;
+      if (p.speedMult > 1) { p.speedMult -= dt/5000; if(p.speedMult<1) p.speedMult=1; }
     });
 
     // Spawn items
@@ -287,51 +284,15 @@ function startRoomTick(code) {
         }
       });
 
-      // Check item pickups
+      // Check item pickups - INSTANT activation on pickup
       room.items.forEach(item => {
-        if (!item.active || p.item) return;
+        if (!item.active) return;
         const dist = Math.hypot(p.x + 10 - item.x, p.y + 12 - item.y);
         if (dist < 22) {
           item.active = false;
-          p.item = item.type;
-          if (!p.isBot) io.to(sid).emit('item-collected', { type: item.type });
+          activateItem(room, code, sid, p, item.type);
         }
       });
-
-      // Magnet: pulls YOUR eggs towards you
-      if (p.magnetTimer > 0) {
-        room.eggs.forEach(egg => {
-          if (!egg.active) return;
-          const dist = Math.hypot(p.x + 10 - egg.x, p.y + 12 - egg.y);
-          if (dist < 150 && dist > 20) {
-            const a = Math.atan2(p.y + 12 - egg.y, p.x + 10 - egg.x);
-            egg.x += Math.cos(a) * 3;
-            egg.y += Math.sin(a) * 3;
-          }
-        });
-      }
-
-      // Steal touch: -1 from victim, respawn a random collected egg
-      if (p.stealActive) {
-        Object.entries(room.players).forEach(([sid2, p2]) => {
-          if (sid2 === sid) return;
-          const dist = Math.hypot(p.x - p2.x, p.y - p2.y);
-          if (dist < 30 && p2.collected > 0) {
-            p.stealActive = false;
-            p2.collected--;
-            // Respawn a random inactive (collected) egg back on the map
-            const inactive = room.eggs.filter(e => !e.active && !e.isBomb);
-            if (inactive.length > 0) {
-              const egg = inactive[Math.floor(Math.random() * inactive.length)];
-              egg.active = true;
-              const pos = findSpotInMap(room.mapObjects, room.mapGround);
-              if (pos) { egg.x = pos.x; egg.y = pos.y; }
-            }
-            io.to(sid).emit('effect', { type: 'steal-success', victim: p2.name });
-            if (!p2.isBot) io.to(sid2).emit('effect', { type: 'steal-victim', thief: p.name });
-          }
-        });
-      }
     });
 
     // Broadcast state
@@ -357,12 +318,13 @@ function startRoomTick(code) {
         uid: p.uid, name: p.name, colorIdx: p.colorIdx,
         x: Math.round(p.x), y: Math.round(p.y), dir: p.dir, moving: p.moving,
         collected: p.collected,
-        item: p.item,
+        item: null,
         stunned: p.stunned > 0, caged: p.caged > 0,
-        shield: p.shield, speedBoost: p.speedMult > 1,
-        magnetActive: p.magnetTimer > 0, stealActive: p.stealActive,
-        confused: p.confusionTimer > 0,
-        radarActive: p.radarTimer > 0,
+        shield: false, speedBoost: p.speedMult > 1,
+        magnetActive: false, stealActive: false,
+        confused: false,
+        radarActive: false,
+        ghost: p.ghostTimer > 0,
       };
     });
     Object.keys(room.players).forEach(sid => {
@@ -400,8 +362,7 @@ function startRound(code) {
     p.collected = 0;
     p.item = null; p.dir = 'down';
     p.stunned = 0; p.caged = 0; p.speedMult = 1;
-    p.shield = false; p.magnetTimer = 0; p.stealActive = false;
-    p.confusionTimer = 0; p.radarTimer = 0;
+    p.ghostTimer = 0;
   });
 
   // Spawn eggs for each player
@@ -482,6 +443,115 @@ function endRound(code, winnerSid) {
   }
 }
 
+// ============ INSTANT ITEM ACTIVATION ============
+function activateItem(room, code, sid, p, type) {
+  // Notify the player who picked it up
+  if (!p.isBot) io.to(sid).emit('item-collected', { type });
+
+  switch (type) {
+    case 'tornado': {
+      // Launch all enemies nearby into the air (stun + push away)
+      Object.entries(room.players).forEach(([sid2, p2]) => {
+        if (sid2 === sid) return;
+        const dist = Math.hypot(p.x - p2.x, p.y - p2.y);
+        if (dist < 180) {
+          const angle = Math.atan2(p2.y - p.y, p2.x - p.x);
+          const force = 250 * (1 - dist / 180);
+          p2.x += Math.cos(angle) * force;
+          p2.y += Math.sin(angle) * force;
+          p2.x = Math.max(TILE, Math.min(p2.x, (MAP_W-1)*TILE-20));
+          p2.y = Math.max(TILE, Math.min(p2.y, (MAP_H-1)*TILE-24));
+          p2.stunned = 2000;
+          if (!p2.isBot) io.to(sid2).emit('effect', { type: 'tornado-hit', angle, force, by: p.name });
+        }
+      });
+      // Notify all players for visual effect
+      Object.keys(room.players).forEach(sid2 => {
+        if (!room.players[sid2].isBot) io.to(sid2).emit('effect', { type: 'tornado-spawn', x: p.x+10, y: p.y+12 });
+      });
+      break;
+    }
+    case 'rayo': {
+      // Freeze all enemies for 2.5s
+      Object.entries(room.players).forEach(([sid2, p2]) => {
+        if (sid2 === sid) return;
+        p2.caged = 2500;
+        if (!p2.isBot) io.to(sid2).emit('effect', { type: 'rayo-hit', by: p.name });
+      });
+      Object.keys(room.players).forEach(sid2 => {
+        if (!room.players[sid2].isBot) io.to(sid2).emit('effect', { type: 'rayo-flash' });
+      });
+      break;
+    }
+    case 'terremoto': {
+      // Stun all enemies + massive screen shake
+      Object.entries(room.players).forEach(([sid2, p2]) => {
+        if (sid2 === sid) return;
+        p2.stunned = 1800;
+        // Random push
+        const angle = Math.random() * Math.PI * 2;
+        p2.x += Math.cos(angle) * 60;
+        p2.y += Math.sin(angle) * 60;
+        p2.x = Math.max(TILE, Math.min(p2.x, (MAP_W-1)*TILE-20));
+        p2.y = Math.max(TILE, Math.min(p2.y, (MAP_H-1)*TILE-24));
+        if (!p2.isBot) io.to(sid2).emit('effect', { type: 'terremoto-hit' });
+      });
+      Object.keys(room.players).forEach(sid2 => {
+        if (!room.players[sid2].isBot) io.to(sid2).emit('effect', { type: 'terremoto-shake' });
+      });
+      break;
+    }
+    case 'teletransporte': {
+      // Teleport to nearest active egg
+      let nearestEgg = null, nearestDist = Infinity;
+      room.eggs.forEach(egg => {
+        if (!egg.active || egg.isBomb) return;
+        const dist = Math.hypot(p.x + 10 - egg.x, p.y + 12 - egg.y);
+        if (dist < nearestDist) { nearestDist = dist; nearestEgg = egg; }
+      });
+      const oldX = p.x, oldY = p.y;
+      if (nearestEgg) {
+        p.x = nearestEgg.x - 10;
+        p.y = nearestEgg.y - 12;
+      }
+      if (!p.isBot) io.to(sid).emit('effect', { type: 'teletransporte-go', fromX: oldX, fromY: oldY, toX: p.x, toY: p.y });
+      Object.keys(room.players).forEach(sid2 => {
+        if (sid2 === sid || room.players[sid2].isBot) return;
+        io.to(sid2).emit('effect', { type: 'teletransporte-other', x: p.x+10, y: p.y+12 });
+      });
+      break;
+    }
+    case 'lluvia': {
+      // Spawn 10 extra eggs around the player
+      for (let i = 0; i < 10; i++) {
+        const angle = (i / 10) * Math.PI * 2;
+        const radius = 50 + Math.random() * 80;
+        const ex = p.x + 10 + Math.cos(angle) * radius;
+        const ey = p.y + 12 + Math.sin(angle) * radius;
+        const clampedX = Math.max(TILE+10, Math.min(ex, (MAP_W-1)*TILE-10));
+        const clampedY = Math.max(TILE+10, Math.min(ey, (MAP_H-1)*TILE-10));
+        room.eggs.push({
+          id: 'e' + room.eggIdCounter++,
+          x: clampedX, y: clampedY,
+          colorIdx: Math.floor(Math.random() * 8),
+          active: true, isGolden: false,
+        });
+      }
+      Object.keys(room.players).forEach(sid2 => {
+        if (!room.players[sid2].isBot) io.to(sid2).emit('effect', { type: 'lluvia-spawn', x: p.x+10, y: p.y+12 });
+      });
+      break;
+    }
+    case 'fantasma': {
+      // Become invisible + speed boost for 5s
+      p.ghostTimer = 5000;
+      p.speedMult = 2.5;
+      if (!p.isBot) io.to(sid).emit('effect', { type: 'fantasma-go' });
+      break;
+    }
+  }
+}
+
 // ============ BOT AI ============
 const BOT_NAMES = ['Sra. Mirta', 'Don Simón', "Ma'am Pamela"];
 const BOT_SPEED = 2.5;
@@ -544,67 +614,7 @@ function updateBots(room, dt) {
       p.moving = true;
     }
 
-    // Use items
-    if (p.item) {
-      p.botItemTimer -= dt;
-      if (p.botItemTimer <= 0) {
-        p.botItemTimer = 2000 + Math.random()*4000;
-        let nearestPlayer = null, npDist = Infinity;
-        Object.entries(room.players).forEach(([sid2, p2]) => {
-          if (sid2 === sid) return;
-          const d = Math.hypot(p.x-p2.x, p.y-p2.y);
-          if (d < npDist) { npDist = d; nearestPlayer = {sid:sid2,p:p2}; }
-        });
-
-        switch(p.item) {
-          case 'speed': p.speedMult = 2; break;
-          case 'shield': p.shield = true; break;
-          case 'magnet': p.magnetTimer = ITEM_DURATION.magnet; break;
-          case 'radar': p.radarTimer = 5000; break;
-          case 'cage':
-            if (nearestPlayer && npDist < 150) {
-              if (nearestPlayer.p.shield) nearestPlayer.p.shield = false;
-              else { nearestPlayer.p.caged = 3000; if(!nearestPlayer.p.isBot) io.to(nearestPlayer.sid).emit('effect',{type:'caged',by:p.name}); }
-            }
-            break;
-          case 'confusion':
-            Object.entries(room.players).forEach(([sid2, p2]) => {
-              if (sid2 === sid) return;
-              if (p2.shield) p2.shield = false;
-              else { p2.confusionTimer = 3000; if(!p2.isBot) io.to(sid2).emit('effect',{type:'confused',by:p.name}); }
-            });
-            break;
-          case 'steal':
-            p.stealActive = true;
-            setTimeout(() => { p.stealActive = false; }, 5000);
-            break;
-          case 'bomb_egg':
-            const bx=p.x+10, by2=p.y+12;
-            room.eggs.push({id:'b'+room.eggIdCounter++,x:bx,y:by2,owner:'bomb',colorIdx:-1,active:true,collected:false,isBomb:true,placedBy:sid});
-            setTimeout(()=>{
-              const bomb=room.eggs.find(e=>e.x===bx&&e.y===by2&&e.isBomb&&e.active);
-              if(!bomb)return; bomb.active=false;
-              Object.entries(room.players).forEach(([sid2,p2])=>{
-                const d=Math.hypot(p2.x+10-bx,p2.y+12-by2);
-                if(d<100){
-                  const a=Math.atan2(p2.y+12-by2,p2.x+10-bx);
-                  const f=200*(1-d/100);
-                  p2.x+=Math.cos(a)*f;p2.y+=Math.sin(a)*f;
-                  p2.x=Math.max(TILE,Math.min(p2.x,(MAP_W-1)*TILE-20));
-                  p2.y=Math.max(TILE,Math.min(p2.y,(MAP_H-1)*TILE-24));
-                  p2.stunned=1000;
-                  if(!p2.isBot)io.to(sid2).emit('effect',{type:'bomb-hit',angle:a,force:f});
-                }
-              });
-              Object.keys(room.players).forEach(sid2=>{
-                if(!room.players[sid2].isBot)io.to(sid2).emit('effect',{type:'bomb-explode',x:bx,y:by2});
-              });
-            },2000);
-            break;
-        }
-        p.item = null;
-      }
-    }
+    // Bots don't hold items anymore - items activate on pickup
   });
 }
 
@@ -751,94 +761,8 @@ io.on('connection', (socket) => {
     player.dir = data.dir; player.moving = data.moving;
   });
 
-  socket.on('use-item', () => {
-    if (!currentRoom || !rooms[currentRoom]) return;
-    const room = rooms[currentRoom];
-    const p = room.players[socket.id];
-    if (!p || !p.item || p.stunned > 0 || p.caged > 0) return;
-    const item = p.item;
-    p.item = null;
-
-    switch (item) {
-      case 'cage': {
-        let closest = null, closestDist = 150;
-        Object.entries(room.players).forEach(([sid, p2]) => {
-          if (sid === socket.id) return;
-          const dist = Math.hypot(p.x-p2.x, p.y-p2.y);
-          if (dist < closestDist) {
-            const ddx=p2.x-p.x, ddy=p2.y-p.y;
-            let ok=false;
-            if(p.dir==='right'&&ddx>0)ok=true;if(p.dir==='left'&&ddx<0)ok=true;
-            if(p.dir==='down'&&ddy>0)ok=true;if(p.dir==='up'&&ddy<0)ok=true;
-            if(ok){closest=sid;closestDist=dist;}
-          }
-        });
-        if (closest) {
-          const victim=room.players[closest];
-          if(victim.shield){victim.shield=false;io.to(closest).emit('effect',{type:'shield-block',attack:'cage'});}
-          else{victim.caged=ITEM_DURATION.cage;io.to(closest).emit('effect',{type:'caged',by:p.name});}
-          io.to(socket.id).emit('effect',{type:'cage-used',hit:true});
-        } else { io.to(socket.id).emit('effect',{type:'cage-miss'}); }
-        break;
-      }
-      case 'speed':
-        p.speedMult = 2;
-        io.to(socket.id).emit('effect',{type:'speed-boost'});
-        break;
-      case 'steal':
-        p.stealActive = true;
-        setTimeout(() => { p.stealActive = false; }, 5000);
-        io.to(socket.id).emit('effect',{type:'steal-active'});
-        break;
-      case 'magnet':
-        p.magnetTimer = ITEM_DURATION.magnet;
-        io.to(socket.id).emit('effect',{type:'magnet-active'});
-        break;
-      case 'confusion':
-        Object.entries(room.players).forEach(([sid, p2]) => {
-          if (sid === socket.id) return;
-          if(p2.shield){p2.shield=false;io.to(sid).emit('effect',{type:'shield-block',attack:'confusion'});}
-          else{p2.confusionTimer=ITEM_DURATION.confusion;io.to(sid).emit('effect',{type:'confused',by:p.name});}
-        });
-        io.to(socket.id).emit('effect',{type:'confusion-used'});
-        break;
-      case 'shield':
-        p.shield = true;
-        io.to(socket.id).emit('effect',{type:'shield-active'});
-        break;
-      case 'radar':
-        p.radarTimer = 5000;
-        io.to(socket.id).emit('effect',{type:'radar-active'});
-        break;
-      case 'bomb_egg': {
-        const bombId = 'b'+room.eggIdCounter++;
-        const bombX=p.x+10, bombY=p.y+12;
-        room.eggs.push({id:bombId,x:bombX,y:bombY,owner:'bomb',colorIdx:-1,active:true,collected:false,isBomb:true,placedBy:socket.id});
-        io.to(socket.id).emit('effect',{type:'bomb-placed'});
-        setTimeout(()=>{
-          const egg=room.eggs.find(e=>e.id===bombId);
-          if(!egg||!egg.active)return; egg.active=false;
-          const BLAST_RADIUS=100, LAUNCH_FORCE=200;
-          Object.entries(room.players).forEach(([sid2,p2])=>{
-            const dist=Math.hypot(p2.x+10-bombX,p2.y+12-bombY);
-            if(dist<BLAST_RADIUS){
-              const angle=Math.atan2(p2.y+12-bombY,p2.x+10-bombX);
-              const force=LAUNCH_FORCE*(1-dist/BLAST_RADIUS);
-              p2.x+=Math.cos(angle)*force;p2.y+=Math.sin(angle)*force;
-              p2.x=Math.max(TILE,Math.min(p2.x,(MAP_W-1)*TILE-20));
-              p2.y=Math.max(TILE,Math.min(p2.y,(MAP_H-1)*TILE-24));
-              p2.stunned=1000;
-              if(!p2.isBot)io.to(sid2).emit('effect',{type:'bomb-hit',angle,force});
-            }
-          });
-          Object.keys(room.players).forEach(sid2=>{
-            if(!room.players[sid2].isBot)io.to(sid2).emit('effect',{type:'bomb-explode',x:bombX,y:bombY});
-          });
-        },2000);
-        break;
-      }
-    }
-  });
+  // Items are now instant-use on pickup, no manual use needed
+  socket.on('use-item', () => {});
 
   socket.on('next-round', () => {
     if (!currentRoom || !rooms[currentRoom]) return;
