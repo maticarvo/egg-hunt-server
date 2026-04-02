@@ -954,7 +954,7 @@ function startRunnerTick(code) {
     Object.values(room.players).forEach(p => {
       if (!p.alive) return;
       if (p.jumping || p.jumpY < 0) {
-        p.jumpVY += 0.000055 * dt;
+        p.jumpVY += 0.00015 * dt;
         p.jumpY += p.jumpVY * dt;
         if (p.jumpY >= 0) { p.jumpY = 0; p.jumpVY = 0; p.jumping = false; }
       }
@@ -968,7 +968,7 @@ function startRunnerTick(code) {
       if (nearObs && p.jumpY >= 0) {
         // Jump with some randomness (bots aren't perfect)
         if (Math.random() > 0.15) {
-          p.jumpVY = -0.022;
+          p.jumpVY = -0.018;
           p.jumping = true;
         }
       }
@@ -978,13 +978,13 @@ function startRunnerTick(code) {
     Object.entries(room.players).forEach(([sid, p]) => {
       if (!p.alive) return;
       const px1 = 0.05, px2 = 0.1; // player hitbox x range (normalized)
-      const onGround = p.jumpY >= -0.15; // on or near ground
+      const onGround = p.jumpY >= -0.08; // on or near ground
 
       room.obstacles.forEach(o => {
         if (o.x > px2 + 0.01 || o.x + o.w < px1 - 0.01) return; // no x overlap
-        // For birds: only hit if player is jumping high
+        // For birds: only hit if player is mid-jump (duck to avoid)
         if (o.type === 'bird') {
-          if (p.jumpY < -0.4) { // player is high in air where bird flies
+          if (p.jumpY < -0.15) {
             eliminatePlayer(room, code, sid, p);
           }
           return;
@@ -1111,7 +1111,7 @@ io.on('connection', (socket) => {
     if (!currentRunnerRoom || !runnerRooms[currentRunnerRoom]) return;
     const p = runnerRooms[currentRunnerRoom].players[socket.id];
     if (!p || !p.alive || p.jumping || p.jumpY < 0) return;
-    p.jumpVY = -0.022;
+    p.jumpVY = -0.018;
     p.jumping = true;
   });
 
