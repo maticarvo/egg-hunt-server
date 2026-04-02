@@ -870,7 +870,7 @@ const runnerRooms = {};
 
 function createRunnerRoom(code) {
   return {
-    code, host: null, state: 'lobby', gameType: 'runner',
+    code, host: null, state: 'lobby', gameType: 'runner', isPublic: false,
     players: {}, playerOrder: [],
     obstacles: [], obstacleTimer: 0, speed: 3, elapsed: 0,
     tickInterval: null, eliminationOrder: [],
@@ -1057,6 +1057,35 @@ const RUNNER_BOT_NAMES = ['Sra. Mirta', 'Don Simón', "Ma'am Pamela", "Ma'am Con
 // Runner socket handlers (added to existing connection)
 io.on('connection', (socket) => {
   let currentRunnerRoom = null;
+
+  socket.on('runner-quickplay', ({ name, uid }, cb) => {
+    // Find an open public runner room
+    const available = Object.values(runnerRooms).find(r =>
+      r.isPublic && r.state === 'lobby' &&
+      Object.values(r.players).filter(p => !p.isBot && p.connected).length < 6
+    );
+    if (available) {
+      const count = Object.keys(available.players).length;
+      available.players[socket.id] = createRunnerPlayer(name, uid, count);
+      available.playerOrder.push(socket.id);
+      socket.join(available.code);
+      currentRunnerRoom = available.code;
+      cb({ ok: true, code: available.code });
+      io.to(available.code).emit('room-update', getRunnerRoomData(available.code));
+    } else {
+      // Create new public room
+      const code = 'R' + Math.random().toString(36).substring(2,6).toUpperCase();
+      runnerRooms[code] = createRunnerRoom(code);
+      runnerRooms[code].host = socket.id;
+      runnerRooms[code].isPublic = true;
+      runnerRooms[code].players[socket.id] = createRunnerPlayer(name, uid, 0);
+      runnerRooms[code].playerOrder.push(socket.id);
+      socket.join(code);
+      currentRunnerRoom = code;
+      cb({ ok: true, code, created: true });
+      io.to(code).emit('room-update', getRunnerRoomData(code));
+    }
+  });
 
   socket.on('runner-solo', ({ name, uid }, cb) => {
     const code = 'R' + Math.random().toString(36).substring(2,6).toUpperCase();
