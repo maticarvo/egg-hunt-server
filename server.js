@@ -111,68 +111,6 @@ const MAPS = {
       return {ground:g, objects:o};
     }
   },
-  cemento: {
-    name: 'Gran Circuito',
-    icon: '🏟️',
-    build: () => {
-      const g = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill('cement'));
-      const o = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill(null));
-      for(let x=0;x<MAP_W;x++){o[0][x]='fence';o[MAP_H-1][x]='fence';}
-      for(let y=0;y<MAP_H;y++){o[y][0]='fence';o[y][MAP_W-1]='fence';}
-      // Piso variado
-      for(let y=1;y<MAP_H-1;y++) for(let x=1;x<MAP_W-1;x++)
-        g[y][x] = ((x+y)%5===0) ? 'cement_wave' : 'cement';
-      // Muros internos formando laberinto ligero
-      for(let x=5;x<12;x++) o[5][x]='wall';
-      for(let x=18;x<25;x++) o[5][x]='wall';
-      for(let x=5;x<12;x++) o[16][x]='wall';
-      for(let x=18;x<25;x++) o[16][x]='wall';
-      for(let y=8;y<14;y++) o[y][14]='wall';
-      // Kioscos en esquinas interiores
-      o[3][3]='kiosk'; o[3][4]='kiosk'; o[4][3]='kiosk'; o[4][4]='kiosk';
-      o[3][MAP_W-5]='kiosk'; o[3][MAP_W-4]='kiosk';
-      o[MAP_H-5][3]='kiosk'; o[MAP_H-5][4]='kiosk';
-      o[MAP_H-5][MAP_W-5]='kiosk'; o[MAP_H-5][MAP_W-4]='kiosk';
-      return {ground:g, objects:o};
-    }
-  },
-  jardin: {
-    name: 'Bosque Encantado',
-    icon: '🌳',
-    build: () => {
-      const g = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill('grass'));
-      const o = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill(null));
-      for(let x=0;x<MAP_W;x++){o[0][x]='fence';o[MAP_H-1][x]='fence';}
-      for(let y=0;y<MAP_H;y++){o[y][0]='fence';o[y][MAP_W-1]='fence';}
-      // Caminos cruzados
-      for(let x=1;x<MAP_W-1;x++){g[MAP_H/2|0][x]='path';g[(MAP_H/3|0)][x]='path';g[(MAP_H*2/3|0)][x]='path';}
-      for(let y=1;y<MAP_H-1;y++){g[y][MAP_W/2|0]='path';g[y][(MAP_W/3|0)]='path';g[y][(MAP_W*2/3|0)]='path';}
-      // Muchos árboles
-      [[2,3],[2,8],[2,14],[2,22],[2,27],
-       [5,5],[5,12],[5,18],[5,25],
-       [8,3],[8,16],[8,27],
-       [12,5],[12,12],[12,22],
-       [15,3],[15,9],[15,18],[15,25],
-       [18,5],[18,14],[18,22],[18,27],
-       [19,8],[19,18]].forEach(([y,x])=>{
-        if(y>0&&y<MAP_H-1&&x>0&&x<MAP_W-1) o[y][x]='tree';
-      });
-      // Arbustos
-      [[4,2],[4,17],[4,24],[9,7],[9,21],
-       [13,8],[13,18],[17,4],[17,15],[17,24]].forEach(([y,x])=>{
-        if(y>0&&y<MAP_H-1&&x>0&&x<MAP_W-1) o[y][x]='bush';
-      });
-      // Lagos
-      [[6,8],[6,9],[6,10],[7,8],[7,9],[7,10],
-       [14,20],[14,21],[15,20],[15,21]].forEach(([y,x])=>{
-        if(y>0&&y<MAP_H-1&&x>0&&x<MAP_W-1) g[y][x]='water';
-      });
-      // Flores
-      for(let y=1;y<MAP_H-1;y++) for(let x=1;x<MAP_W-1;x++)
-        if(g[y][x]==='grass'&&((x*13+y*7)%9===0)) g[y][x]='flowers';
-      return {ground:g, objects:o};
-    }
-  },
 };
 const MAP_IDS = Object.keys(MAPS);
 
@@ -208,6 +146,7 @@ function createRoom(code) {
     eggs: [], items: [],
     eggIdCounter: 0, itemIdCounter: 0,
     itemSpawnTimer: 0,
+    eventTimer: 0, activeEvent: null, eventDuration: 0,
     roundResults: [], seriesWins: {},
     tickInterval: null,
   };
@@ -295,6 +234,29 @@ function startRoomTick(code) {
       }
     }
 
+    // ---- GLOBAL RANDOM EVENTS ----
+    if (room.activeEvent) {
+      room.eventDuration -= dt;
+      if (room.eventDuration <= 0) {
+        // Event ended
+        Object.keys(room.players).forEach(sid2 => {
+          if (!room.players[sid2].isBot) io.to(sid2).emit('effect', { type: 'event-end', event: room.activeEvent });
+        });
+        room.activeEvent = null;
+      }
+    }
+    room.eventTimer += dt / 1000;
+    if (room.eventTimer >= 20 + Math.random() * 15 && !room.activeEvent) {
+      room.eventTimer = 0;
+      const events = ['invertir','velocidad','camara_loca','oscuridad','gigantes','mini'];
+      const ev = events[Math.floor(Math.random() * events.length)];
+      room.activeEvent = ev;
+      room.eventDuration = 6000; // 6 seconds
+      Object.keys(room.players).forEach(sid2 => {
+        if (!room.players[sid2].isBot) io.to(sid2).emit('effect', { type: 'event-start', event: ev });
+      });
+    }
+
     // Update bots
     updateBots(room, dt);
 
@@ -351,6 +313,7 @@ function startRoomTick(code) {
       mapId: room.settings.mapId,
       mapGround: room.mapGround,
       mapObjects: room.mapObjects,
+      activeEvent: room.activeEvent,
       players: {},
       eggs: room.eggs.filter(e => e.active).map(e => ({
         id: e.id, x: Math.round(e.x), y: Math.round(e.y),
