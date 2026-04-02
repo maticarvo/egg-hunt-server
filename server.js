@@ -27,7 +27,7 @@ const SOLID = ['fence','wall','tree','rock','kiosk','bush'];
 const MAPS = {
   patio: {
     name: 'Parque Boris',
-    icon: '🏞️',
+    icon: '🤓',
     build: () => {
       const g = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill('grass'));
       const o = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill(null));
@@ -601,7 +601,7 @@ function activateItem(room, code, sid, p, type) {
 }
 
 // ============ BOT AI ============
-const BOT_NAMES = ['Sra. Mirta', 'Don Simón', "Ma'am Pamela", 'Tío Carlos', 'Abuela Rosa'];
+const BOT_NAMES = ['Sra. Mirta', 'Don Simón', "Ma'am Pamela", "Ma'am Coni", "Ma'am Mabel"];
 const BOT_SPEED = 2.5;
 
 function addBots(code, count) {
@@ -738,8 +738,14 @@ io.on('connection', (socket) => {
     socket.join(code);
     currentRoom = code;
     addBots(code, 5);
-    cb({ ok: true, code });
+    rooms[code].players[socket.id].ready = true;
+    cb({ ok: true, code, solo: true });
     io.to(code).emit('room-update', getRoomLobbyData(code));
+    // Auto-start solo game
+    setTimeout(() => {
+      const room = rooms[code];
+      if (room) { room.round = 1; startRound(code); }
+    }, 500);
   });
 
   socket.on('create-room', ({ name, uid }, cb) => {
