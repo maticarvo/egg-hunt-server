@@ -982,9 +982,9 @@ function startRunnerTick(code) {
 
       room.obstacles.forEach(o => {
         if (o.x > px2 + 0.01 || o.x + o.w < px1 - 0.01) return; // no x overlap
-        // For birds: only hit if player is high in air
+        // Birds fly at mid-height: jump over them (same as ground obstacles)
         if (o.type === 'bird') {
-          if (p.jumpY < -0.12) {
+          if (p.jumpY >= -0.05) {
             eliminatePlayer(room, code, sid, p);
           }
           return;
