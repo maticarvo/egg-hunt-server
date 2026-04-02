@@ -26,40 +26,88 @@ const SOLID = ['fence','wall','tree','rock','kiosk','bush'];
 
 const MAPS = {
   patio: {
-    name: 'Pista Primavera',
-    icon: '🌸',
+    name: 'Parque Boris',
+    icon: '🏞️',
     build: () => {
       const g = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill('grass'));
       const o = Array.from({length:MAP_H}, ()=>Array(MAP_W).fill(null));
-      // Bordes
+      // Iron fence border
       for(let x=0;x<MAP_W;x++){o[0][x]='fence';o[MAP_H-1][x]='fence';}
       for(let y=0;y<MAP_H;y++){o[y][0]='fence';o[y][MAP_W-1]='fence';}
-      // Camino de carrera en circuito
-      for(let x=3;x<MAP_W-3;x++){g[4][x]='path';g[MAP_H-5][x]='path';}
-      for(let y=4;y<MAP_H-4;y++){g[y][3]='path';g[y][MAP_W-4]='path';}
-      // Piso interior cemento
-      for(let y=5;y<MAP_H-5;y++) for(let x=4;x<MAP_W-4;x++)
-        g[y][x] = ((x+y)%7===0) ? 'cement_wave' : 'cement';
-      // Árboles dispersos
-      [[3,8],[3,15],[3,22],[6,6],[6,14],[6,22],
-       [10,4],[10,12],[10,20],[10,26],
-       [15,6],[15,14],[15,22],[18,8],[18,18]].forEach(([y,x])=>{
+
+      // Main paths: cross shape through park
+      const midX=MAP_W/2|0, midY=MAP_H/2|0;
+      for(let x=1;x<MAP_W-1;x++) g[midY][x]='path';
+      for(let y=1;y<MAP_H-1;y++) g[y][midX]='path';
+      // Diagonal paths from corners
+      for(let i=1;i<8;i++){
+        if(i+1<MAP_H-1&&i+1<MAP_W-1) g[i+1][i+1]='path';
+        if(i+1<MAP_H-1&&MAP_W-2-i>0) g[i+1][MAP_W-2-i]='path';
+        if(MAP_H-2-i>0&&i+1<MAP_W-1) g[MAP_H-2-i][i+1]='path';
+        if(MAP_H-2-i>0&&MAP_W-2-i>0) g[MAP_H-2-i][MAP_W-2-i]='path';
+      }
+      // Circular path around center plaza
+      for(let a=0;a<24;a++){
+        const angle=a/24*Math.PI*2;
+        const rx=midX+Math.round(Math.cos(angle)*5);
+        const ry=midY+Math.round(Math.sin(angle)*4);
+        if(rx>0&&rx<MAP_W-1&&ry>0&&ry<MAP_H-1) g[ry][rx]='path';
+      }
+      // Center plaza (cement)
+      for(let dy=-2;dy<=2;dy++) for(let dx=-2;dx<=2;dx++){
+        const cx=midX+dx,cy=midY+dy;
+        if(cx>0&&cx<MAP_W-1&&cy>0&&cy<MAP_H-1) g[cy][cx]='cement';
+      }
+      // Kiosk/gazebo in center
+      o[midY][midX]='kiosk'; o[midY-1][midX]='kiosk';
+      o[midY][midX+1]='kiosk'; o[midY-1][midX+1]='kiosk';
+
+      // Grove of trees - top left area
+      [[2,2],[2,3],[3,2],[3,4],[4,3],[2,5],[4,5]].forEach(([y,x])=>{
+        if(!o[y][x]) o[y][x]='tree';
+      });
+      // Grove - top right
+      [[2,MAP_W-3],[2,MAP_W-4],[3,MAP_W-3],[3,MAP_W-5],[4,MAP_W-4],[2,MAP_W-6]].forEach(([y,x])=>{
+        if(x>0&&!o[y][x]) o[y][x]='tree';
+      });
+      // Grove - bottom left
+      [[MAP_H-3,2],[MAP_H-3,3],[MAP_H-4,2],[MAP_H-4,4],[MAP_H-5,3]].forEach(([y,x])=>{
+        if(y<MAP_H-1&&!o[y][x]) o[y][x]='tree';
+      });
+      // Grove - bottom right
+      [[MAP_H-3,MAP_W-3],[MAP_H-3,MAP_W-4],[MAP_H-4,MAP_W-3],[MAP_H-4,MAP_W-5],[MAP_H-5,MAP_W-4]].forEach(([y,x])=>{
+        if(y<MAP_H-1&&x>0&&!o[y][x]) o[y][x]='tree';
+      });
+      // Scattered trees along edges
+      [[6,8],[6,22],[8,1],[14,1],[8,MAP_W-2],[14,MAP_W-2],[16,8],[16,22]].forEach(([y,x])=>{
         if(y>0&&y<MAP_H-1&&x>0&&x<MAP_W-1&&!o[y][x]) o[y][x]='tree';
       });
-      // Arbustos como obstáculos
-      [[5,10],[5,18],[8,8],[8,20],[12,10],[12,18],
-       [16,8],[16,20],[14,14]].forEach(([y,x])=>{
+
+      // Small lake - left side
+      [[9,5],[9,6],[9,7],[10,5],[10,6],[10,7],[11,6]].forEach(([y,x])=>{
+        g[y][x]='water';
+      });
+      // Rocks around lake
+      [[8,5],[8,7],[11,5],[11,7]].forEach(([y,x])=>{
+        if(!o[y][x]) o[y][x]='rock';
+      });
+
+      // Bushes forming garden beds
+      [[5,12],[5,13],[5,17],[5,18],
+       [16,12],[16,13],[16,17],[16,18],
+       [7,10],[7,20],[14,10],[14,20]].forEach(([y,x])=>{
         if(y>0&&y<MAP_H-1&&x>0&&x<MAP_W-1&&!o[y][x]) o[y][x]='bush';
       });
-      // Rocas
-      [[7,16],[13,10],[9,24],[16,5]].forEach(([y,x])=>{
-        if(y>0&&y<MAP_H-1&&x>0&&x<MAP_W-1&&!o[y][x]) o[y][x]='rock';
-      });
-      // Bancas decorativas
-      g[8][12]='bench'; g[8][16]='bench'; g[14][12]='bench'; g[14][16]='bench';
-      // Flores
+
+      // Benches along paths
+      g[midY-1][midX-3]='bench'; g[midY-1][midX+4]='bench';
+      g[midY+2][midX-3]='bench'; g[midY+2][midX+4]='bench';
+      g[4][midX-1]='bench'; g[MAP_H-5][midX+1]='bench';
+
+      // Flowers scattered in grass areas
       for(let y=1;y<MAP_H-1;y++) for(let x=1;x<MAP_W-1;x++)
-        if(g[y][x]==='grass'&&((x*13+y*7)%11===0)) g[y][x]='flowers';
+        if(g[y][x]==='grass'&&!o[y][x]&&((x*17+y*13)%13===0)) g[y][x]='flowers';
+
       return {ground:g, objects:o};
     }
   },
