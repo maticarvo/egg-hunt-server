@@ -146,7 +146,7 @@ function createRoom(code) {
     eggs: [], items: [],
     eggIdCounter: 0, itemIdCounter: 0,
     itemSpawnTimer: 0,
-    eventTimer: 0, nextEventAt: 15 + Math.random() * 10, activeEvent: null, eventDuration: 0,
+    eventTimer: 0, nextEventAt: 8 + Math.random() * 5, activeEvent: null, eventDuration: 0,
     roundResults: [], seriesWins: {},
     tickInterval: null,
   };
@@ -248,7 +248,7 @@ function startRoomTick(code) {
     room.eventTimer += dt / 1000;
     if (room.eventTimer >= room.nextEventAt && !room.activeEvent) {
       room.eventTimer = 0;
-      room.nextEventAt = 15 + Math.random() * 10;
+      room.nextEventAt = 8 + Math.random() * 5;
       const events = ['invertir','velocidad','camara_loca','oscuridad','gigantes','mini'];
       const ev = events[Math.floor(Math.random() * events.length)];
       room.activeEvent = ev;
