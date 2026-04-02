@@ -62,21 +62,21 @@ const MAPS = {
       o[midY][midX]='kiosk'; o[midY-1][midX]='kiosk';
       o[midY][midX+1]='kiosk'; o[midY-1][midX+1]='kiosk';
 
-      // Grove of trees - top left area
-      [[2,2],[2,3],[3,2],[3,4],[4,3],[2,5],[4,5]].forEach(([y,x])=>{
+      // Grove of trees - top left (away from spawn at 2,2)
+      [[2,5],[2,6],[3,5],[4,6],[5,5],[3,7]].forEach(([y,x])=>{
         if(!o[y][x]) o[y][x]='tree';
       });
-      // Grove - top right
-      [[2,MAP_W-3],[2,MAP_W-4],[3,MAP_W-3],[3,MAP_W-5],[4,MAP_W-4],[2,MAP_W-6]].forEach(([y,x])=>{
+      // Grove - top right (away from spawn at MAP_W-3,2)
+      [[2,MAP_W-6],[2,MAP_W-7],[3,MAP_W-6],[4,MAP_W-7],[5,MAP_W-6],[3,MAP_W-8]].forEach(([y,x])=>{
         if(x>0&&!o[y][x]) o[y][x]='tree';
       });
-      // Grove - bottom left
-      [[MAP_H-3,2],[MAP_H-3,3],[MAP_H-4,2],[MAP_H-4,4],[MAP_H-5,3]].forEach(([y,x])=>{
-        if(y<MAP_H-1&&!o[y][x]) o[y][x]='tree';
+      // Grove - bottom left (away from spawn at 2,MAP_H-3)
+      [[MAP_H-3,5],[MAP_H-3,6],[MAP_H-4,5],[MAP_H-5,6],[MAP_H-6,5],[MAP_H-4,7]].forEach(([y,x])=>{
+        if(y>0&&y<MAP_H-1&&!o[y][x]) o[y][x]='tree';
       });
-      // Grove - bottom right
-      [[MAP_H-3,MAP_W-3],[MAP_H-3,MAP_W-4],[MAP_H-4,MAP_W-3],[MAP_H-4,MAP_W-5],[MAP_H-5,MAP_W-4]].forEach(([y,x])=>{
-        if(y<MAP_H-1&&x>0&&!o[y][x]) o[y][x]='tree';
+      // Grove - bottom right (away from spawn at MAP_W-3,MAP_H-3)
+      [[MAP_H-3,MAP_W-6],[MAP_H-3,MAP_W-7],[MAP_H-4,MAP_W-6],[MAP_H-5,MAP_W-7],[MAP_H-6,MAP_W-6],[MAP_H-4,MAP_W-8]].forEach(([y,x])=>{
+        if(y>0&&y<MAP_H-1&&x>0&&!o[y][x]) o[y][x]='tree';
       });
       // Scattered trees along edges
       [[6,8],[6,22],[8,1],[14,1],[8,MAP_W-2],[14,MAP_W-2],[16,8],[16,22]].forEach(([y,x])=>{
