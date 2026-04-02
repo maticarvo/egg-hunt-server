@@ -8,6 +8,11 @@ const io = new Server(server, { cors: { origin: '*', methods: ['GET','POST'] } }
 
 const PORT = process.env.PORT || 3001;
 
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  next();
+});
+
 // ============ CONFIG ============
 const TILE = 32;
 const MAP_W = 30, MAP_H = 22;
@@ -865,7 +870,17 @@ function broadcastPublicRooms() {
   io.to('public-lobby').emit('public-rooms', getPublicRoomsList());
 }
 
-app.get('/', (req, res) => res.json({ status: 'ok', rooms: Object.keys(rooms).length }));
+app.get('/', (req, res) => {
+  const activeRooms = Object.values(rooms);
+  const totalPlayers = activeRooms.reduce((sum, r) =>
+    sum + Object.values(r.players).filter(p => !p.isBot && p.connected).length, 0);
+  res.json({
+    status: 'ok',
+    rooms: activeRooms.length,
+    players: totalPlayers,
+    connected: io.engine.clientsCount
+  });
+});
 
 // ============================================================
 // RUNNER GAME
