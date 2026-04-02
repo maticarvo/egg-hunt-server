@@ -17,9 +17,9 @@ const EGGS_PER_PLAYER = 25;
 const ITEM_SPAWN_INTERVAL = 4;
 const MAX_ITEMS = 8;
 const ITEM_TYPES = ['tornado','rayo','terremoto','teletransporte','lluvia','fantasma'];
-const SPAWN_POINTS = [{x:2,y:2},{x:MAP_W-3,y:2},{x:2,y:MAP_H-3},{x:MAP_W-3,y:MAP_H-3}]; // corners
+const SPAWN_POINTS = [{x:2,y:2},{x:MAP_W-3,y:2},{x:2,y:MAP_H-3},{x:MAP_W-3,y:MAP_H-3},{x:Math.floor(MAP_W/2),y:2},{x:Math.floor(MAP_W/2),y:MAP_H-3}];
 const ITEM_DURATION = {};
-const COLORS = ['#3498db','#e74c3c','#2ecc71','#f1c40f'];
+const COLORS = ['#3498db','#e74c3c','#2ecc71','#f1c40f','#9b59b6','#e67e22'];
 
 // ============ MAPS ============
 const SOLID = ['fence','wall','tree','rock','kiosk','bush'];
@@ -601,7 +601,7 @@ function activateItem(room, code, sid, p, type) {
 }
 
 // ============ BOT AI ============
-const BOT_NAMES = ['Sra. Mirta', 'Don Simón', "Ma'am Pamela"];
+const BOT_NAMES = ['Sra. Mirta', 'Don Simón', "Ma'am Pamela", 'Tío Carlos', 'Abuela Rosa'];
 const BOT_SPEED = 2.5;
 
 function addBots(code, count) {
@@ -699,7 +699,7 @@ io.on('connection', (socket) => {
     // Find a public room with space
     const available = Object.values(rooms).find(r =>
       r.isPublic && r.state === 'lobby' &&
-      Object.values(r.players).filter(p => !p.isBot && p.connected).length < 4
+      Object.values(r.players).filter(p => !p.isBot && p.connected).length < 6
     );
     if (available) {
       const count = Object.keys(available.players).length;
@@ -737,7 +737,7 @@ io.on('connection', (socket) => {
     rooms[code].playerOrder.push(socket.id);
     socket.join(code);
     currentRoom = code;
-    addBots(code, 3);
+    addBots(code, 5);
     cb({ ok: true, code });
     io.to(code).emit('room-update', getRoomLobbyData(code));
   });
@@ -759,7 +759,7 @@ io.on('connection', (socket) => {
     if (!room) { cb({ok:false,error:'Sala no encontrada'}); return; }
     if (room.state !== 'lobby') { cb({ok:false,error:'Partida en curso'}); return; }
     const humanCount = Object.values(room.players).filter(p => !p.isBot && p.connected).length;
-    if (humanCount >= 4) { cb({ok:false,error:'Sala llena'}); return; }
+    if (humanCount >= 6) { cb({ok:false,error:'Sala llena'}); return; }
     const count = Object.keys(room.players).length;
     room.players[socket.id] = createPlayer(name, uid, count);
     room.playerOrder.push(socket.id);
@@ -778,11 +778,16 @@ io.on('connection', (socket) => {
     if (!player) return;
     player.ready = !player.ready;
     io.to(currentRoom).emit('room-update', getRoomLobbyData(currentRoom));
-    const entries = Object.values(room.players).filter(p => p.connected);
-    if (entries.length >= 2 && entries.every(p => p.ready)) {
-      room.round = (room.round || 0) + 1;
-      startRound(currentRoom);
-    }
+  });
+
+  socket.on('start-game', () => {
+    if (!currentRoom || !rooms[currentRoom]) return;
+    if (rooms[currentRoom].host !== socket.id) return;
+    const room = rooms[currentRoom];
+    const connected = Object.values(room.players).filter(p => p.connected);
+    if (connected.length < 2) return;
+    room.round = (room.round || 0) + 1;
+    startRound(currentRoom);
   });
 
   socket.on('set-rounds', (rounds) => {
@@ -873,7 +878,7 @@ function getPublicRoomsList() {
         code: r.code,
         hostName: hostPlayer?.name || '???',
         players: humanCount,
-        maxPlayers: 4,
+        maxPlayers: 6,
         rounds: r.settings.rounds,
       };
     });
