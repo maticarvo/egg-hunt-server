@@ -631,8 +631,15 @@ function updateBots(room, dt) {
 }
 
 // ============ SOCKET HANDLERS ============
+function broadcastOnlineCount() {
+  const count = io.engine.clientsCount || 0;
+  io.emit('online-count', count);
+}
+
 io.on('connection', (socket) => {
   let currentRoom = null;
+  broadcastOnlineCount();
+  socket.on('disconnect', () => { setTimeout(broadcastOnlineCount, 100); });
 
   // ---- Public lobby browsing ----
   socket.on('join-public-lobby', () => {
