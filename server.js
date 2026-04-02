@@ -860,6 +860,312 @@ function broadcastPublicRooms() {
 
 app.get('/', (req, res) => res.json({ status: 'ok', rooms: Object.keys(rooms).length }));
 
+// ============================================================
+// RUNNER GAME
+// ============================================================
+const RUNNER_TICK = 30;
+const RUNNER_OBS_TYPES = ['cactus','rock','fence','bird'];
+
+const runnerRooms = {};
+
+function createRunnerRoom(code) {
+  return {
+    code, host: null, state: 'lobby', gameType: 'runner',
+    players: {}, playerOrder: [],
+    obstacles: [], obstacleTimer: 0, speed: 3, elapsed: 0,
+    tickInterval: null, eliminationOrder: [],
+  };
+}
+
+function createRunnerPlayer(name, uid, colorIdx) {
+  return {
+    uid, name, colorIdx, ready: false,
+    alive: true, jumpY: 0, jumpVY: 0, jumping: false,
+    lane: colorIdx, connected: true, isBot: false,
+    botJumpTimer: 0,
+  };
+}
+
+function startRunnerRound(code) {
+  const room = runnerRooms[code];
+  if (!room) return;
+  room.state = 'playing';
+  room.obstacles = [];
+  room.obstacleTimer = 0;
+  room.speed = 3;
+  room.elapsed = 0;
+  room.eliminationOrder = [];
+
+  Object.values(room.players).forEach((p, i) => {
+    p.alive = true; p.jumpY = 0; p.jumpVY = 0; p.jumping = false; p.lane = i;
+  });
+
+  // Countdown
+  room.state = 'countdown';
+  let cd = 3;
+  io.to(code).emit('countdown', 3);
+  const cdInterval = setInterval(() => {
+    cd--;
+    if (cd > 0) { io.to(code).emit('countdown', cd); }
+    else {
+      io.to(code).emit('countdown', 0);
+      room.state = 'playing';
+      startRunnerTick(code);
+      clearInterval(cdInterval);
+    }
+  }, 1000);
+}
+
+function startRunnerTick(code) {
+  const room = runnerRooms[code];
+  if (!room || room.tickInterval) return;
+
+  room.tickInterval = setInterval(() => {
+    if (room.state !== 'playing') return;
+    const dt = 1000 / RUNNER_TICK;
+    room.elapsed += dt;
+
+    // Increase speed over time
+    room.speed = 3 + room.elapsed / 8000;
+
+    // Spawn obstacles
+    room.obstacleTimer += dt;
+    const spawnInterval = Math.max(600, 2000 - room.speed * 100);
+    if (room.obstacleTimer >= spawnInterval) {
+      room.obstacleTimer = 0;
+      const type = RUNNER_OBS_TYPES[Math.floor(Math.random() * RUNNER_OBS_TYPES.length)];
+      let w, h;
+      switch(type) {
+        case 'cactus': w = 0.025; h = 0.12 + Math.random() * 0.08; break;
+        case 'rock': w = 0.04; h = 0.08 + Math.random() * 0.05; break;
+        case 'fence': w = 0.05; h = 0.1; break;
+        case 'bird': w = 0.03; h = 0.05; break;
+        default: w = 0.03; h = 0.1;
+      }
+      room.obstacles.push({ x: 1.1, w, h, type, id: Date.now() });
+    }
+
+    // Move obstacles
+    const moveSpeed = room.speed * 0.0008 * dt;
+    room.obstacles.forEach(o => { o.x -= moveSpeed; });
+    room.obstacles = room.obstacles.filter(o => o.x > -0.1);
+
+    // Update player jumps
+    Object.values(room.players).forEach(p => {
+      if (!p.alive) return;
+      if (p.jumping || p.jumpY < 0) {
+        p.jumpVY += 0.002 * dt;
+        p.jumpY += p.jumpVY * dt;
+        if (p.jumpY >= 0) { p.jumpY = 0; p.jumpVY = 0; p.jumping = false; }
+      }
+    });
+
+    // Bot AI
+    Object.entries(room.players).forEach(([sid, p]) => {
+      if (!p.isBot || !p.alive) return;
+      // Check if obstacle is close
+      const nearObs = room.obstacles.find(o => o.x > 0.05 && o.x < 0.15);
+      if (nearObs && p.jumpY >= 0) {
+        // Jump with some randomness (bots aren't perfect)
+        if (Math.random() > 0.15) {
+          p.jumpVY = -0.75;
+          p.jumping = true;
+        }
+      }
+    });
+
+    // Collision detection
+    Object.entries(room.players).forEach(([sid, p]) => {
+      if (!p.alive) return;
+      const px1 = 0.05, px2 = 0.1; // player hitbox x range (normalized)
+      const playerBottom = p.jumpY >= -0.02; // on or near ground
+      const playerTop = p.jumpY < -0.15; // high in air
+
+      room.obstacles.forEach(o => {
+        if (o.x > px2 + 0.01 || o.x + o.w < px1 - 0.01) return; // no x overlap
+        // For birds: only hit if player is high
+        if (o.type === 'bird') {
+          if (p.jumpY < -0.08) { // player is in air where bird is
+            eliminatePlayer(room, code, sid, p);
+          }
+          return;
+        }
+        // Ground obstacles: hit if player is on ground
+        if (playerBottom) {
+          eliminatePlayer(room, code, sid, p);
+        }
+      });
+    });
+
+    // Check if game over (1 or 0 alive)
+    const alive = Object.entries(room.players).filter(([,p]) => p.alive);
+    if (alive.length <= 1) {
+      // Game over
+      stopRunnerTick(code);
+      room.state = 'gameover';
+      const rankings = [];
+      if (alive.length === 1) {
+        rankings.push({ name: alive[0][1].name, colorIdx: alive[0][1].colorIdx });
+      }
+      // Add eliminated in reverse order
+      [...room.eliminationOrder].reverse().forEach(e => {
+        rankings.push({ name: e.name, colorIdx: e.colorIdx });
+      });
+      const winnerName = rankings[0]?.name || '???';
+      Object.keys(room.players).forEach(sid2 => {
+        if (!room.players[sid2].isBot)
+          io.to(sid2).emit('runner-gameover', { winnerName, rankings });
+      });
+      return;
+    }
+
+    // Broadcast state
+    const state = { speed: room.speed, obstacles: room.obstacles, players: {} };
+    Object.entries(room.players).forEach(([sid, p]) => {
+      state.players[sid] = {
+        name: p.name, colorIdx: p.colorIdx, alive: p.alive,
+        jumpY: p.jumpY, lane: p.lane,
+      };
+    });
+    Object.keys(room.players).forEach(sid => {
+      if (room.players[sid].isBot) return;
+      io.to(sid).emit('runner-state', { ...state, myId: sid });
+    });
+
+  }, 1000 / RUNNER_TICK);
+}
+
+function eliminatePlayer(room, code, sid, p) {
+  if (!p.alive) return;
+  p.alive = false;
+  const aliveCount = Object.values(room.players).filter(pp => pp.alive).length;
+  const totalPlayers = Object.keys(room.players).length;
+  const placement = totalPlayers - room.eliminationOrder.length;
+  room.eliminationOrder.push({ sid, name: p.name, colorIdx: p.colorIdx });
+  Object.keys(room.players).forEach(sid2 => {
+    if (!room.players[sid2].isBot)
+      io.to(sid2).emit('runner-eliminated', { sid, name: p.name, placement });
+  });
+}
+
+function stopRunnerTick(code) {
+  const room = runnerRooms[code];
+  if (room?.tickInterval) { clearInterval(room.tickInterval); room.tickInterval = null; }
+}
+
+const RUNNER_BOT_NAMES = ['Sra. Mirta', 'Don Simón', "Ma'am Pamela", "Ma'am Coni", "Ma'am Mabel"];
+
+// Runner socket handlers (added to existing connection)
+io.on('connection', (socket) => {
+  let currentRunnerRoom = null;
+
+  socket.on('runner-solo', ({ name, uid }, cb) => {
+    const code = 'R' + Math.random().toString(36).substring(2,6).toUpperCase();
+    runnerRooms[code] = createRunnerRoom(code);
+    runnerRooms[code].host = socket.id;
+    runnerRooms[code].players[socket.id] = createRunnerPlayer(name, uid, 0);
+    runnerRooms[code].players[socket.id].ready = true;
+    runnerRooms[code].playerOrder.push(socket.id);
+    socket.join(code);
+    currentRunnerRoom = code;
+    // Add bots
+    for (let i = 0; i < 5; i++) {
+      const botId = 'rbot_' + i + '_' + Date.now();
+      runnerRooms[code].players[botId] = createRunnerPlayer(RUNNER_BOT_NAMES[i], botId, i + 1);
+      runnerRooms[code].players[botId].isBot = true;
+      runnerRooms[code].players[botId].ready = true;
+      runnerRooms[code].playerOrder.push(botId);
+    }
+    cb({ ok: true, code });
+    io.to(code).emit('room-update', getRunnerRoomData(code));
+    // Auto-start
+    setTimeout(() => { if (runnerRooms[code]) startRunnerRound(code); }, 500);
+  });
+
+  socket.on('runner-create', ({ name, uid }, cb) => {
+    const code = 'R' + Math.random().toString(36).substring(2,6).toUpperCase();
+    runnerRooms[code] = createRunnerRoom(code);
+    runnerRooms[code].host = socket.id;
+    runnerRooms[code].players[socket.id] = createRunnerPlayer(name, uid, 0);
+    runnerRooms[code].playerOrder.push(socket.id);
+    socket.join(code);
+    currentRunnerRoom = code;
+    cb({ ok: true, code });
+    io.to(code).emit('room-update', getRunnerRoomData(code));
+  });
+
+  socket.on('runner-join', ({ code, name, uid }, cb) => {
+    const room = runnerRooms[code];
+    if (!room) { cb({ ok: false, error: 'Sala no encontrada' }); return; }
+    if (room.state !== 'lobby') { cb({ ok: false, error: 'Partida en curso' }); return; }
+    const count = Object.keys(room.players).length;
+    if (count >= 6) { cb({ ok: false, error: 'Sala llena' }); return; }
+    room.players[socket.id] = createRunnerPlayer(name, uid, count);
+    room.playerOrder.push(socket.id);
+    socket.join(code);
+    currentRunnerRoom = code;
+    cb({ ok: true, code });
+    io.to(code).emit('room-update', getRunnerRoomData(code));
+  });
+
+  socket.on('runner-jump', () => {
+    if (!currentRunnerRoom || !runnerRooms[currentRunnerRoom]) return;
+    const p = runnerRooms[currentRunnerRoom].players[socket.id];
+    if (!p || !p.alive || p.jumping || p.jumpY < 0) return;
+    p.jumpVY = -0.75;
+    p.jumping = true;
+  });
+
+  // Reuse ready/start-game/leave-room for runner rooms too
+  const origReady = socket.listeners('ready');
+  socket.on('ready', () => {
+    if (currentRunnerRoom && runnerRooms[currentRunnerRoom]) {
+      const room = runnerRooms[currentRunnerRoom];
+      const player = room.players[socket.id];
+      if (!player) return;
+      player.ready = !player.ready;
+      io.to(currentRunnerRoom).emit('room-update', getRunnerRoomData(currentRunnerRoom));
+    }
+  });
+
+  socket.on('start-game', () => {
+    if (currentRunnerRoom && runnerRooms[currentRunnerRoom]) {
+      if (runnerRooms[currentRunnerRoom].host !== socket.id) return;
+      const room = runnerRooms[currentRunnerRoom];
+      const connected = Object.values(room.players).filter(p => p.connected);
+      if (connected.length < 2) return;
+      startRunnerRound(currentRunnerRoom);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    if (currentRunnerRoom && runnerRooms[currentRunnerRoom]) {
+      const room = runnerRooms[currentRunnerRoom];
+      delete room.players[socket.id];
+      socket.leave(currentRunnerRoom);
+      const remaining = Object.values(room.players).filter(p => !p.isBot);
+      if (remaining.length === 0) {
+        stopRunnerTick(currentRunnerRoom);
+        delete runnerRooms[currentRunnerRoom];
+      } else {
+        if (room.host === socket.id) room.host = Object.keys(room.players).find(s => !room.players[s].isBot);
+        io.to(currentRunnerRoom).emit('room-update', getRunnerRoomData(currentRunnerRoom));
+      }
+      currentRunnerRoom = null;
+    }
+  });
+});
+
+function getRunnerRoomData(code) {
+  const room = runnerRooms[code];
+  if (!room) return {};
+  const players = {};
+  Object.entries(room.players).forEach(([sid, p]) => {
+    players[sid] = { uid: p.uid, name: p.name, colorIdx: p.colorIdx, ready: p.ready, connected: p.connected };
+  });
+  return { code: room.code, state: room.state, host: room.host, players };
+}
+
 server.listen(PORT, () => {
-  console.log(`🐰 Rabbit Race Server running on port ${PORT}`);
+  console.log(`🐰 Hampton Games Server running on port ${PORT}`);
 });
