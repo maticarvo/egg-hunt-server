@@ -159,6 +159,7 @@ function getRoomState(room, forSid) {
     players[sid] = {
       name: p.name,
       side: p.side,
+      char: p.char || 'carla',
       streak: p.streak,
       score: p.score,
       answering: !!room.currentProblems[sid]
@@ -419,7 +420,7 @@ io.on('connection', (socket) => {
   let currentRoom = null;
 
   // ── Quick Match ──
-  socket.on('quick-match', ({ name, uid }, cb) => {
+  socket.on('quick-match', ({ name, uid, char }, cb) => {
     // Check if someone is waiting
     const skipped = [];
     let matched = false;
@@ -440,7 +441,7 @@ io.on('connection', (socket) => {
       // Valid match found
       const room = rooms[waiting.code];
       room.players[socket.id] = {
-        name, uid, side: 'right', streak: 0, score: 0
+        name, uid, char, side: 'right', streak: 0, score: 0
       };
       socket.join(waiting.code);
       currentRoom = waiting.code;
@@ -462,7 +463,7 @@ io.on('connection', (socket) => {
       const code = genCode();
       rooms[code] = createRoom(code);
       rooms[code].players[socket.id] = {
-        name, uid, side: 'left', streak: 0, score: 0
+        name, uid, char, side: 'left', streak: 0, score: 0
       };
       socket.join(code);
       currentRoom = code;
@@ -473,12 +474,12 @@ io.on('connection', (socket) => {
   });
 
   // ── Play vs Bot ──
-  socket.on('play-bot', ({ name, uid, difficulty }, cb) => {
+  socket.on('play-bot', ({ name, uid, difficulty, char }, cb) => {
     const preset = BOT_PRESETS[difficulty] ? difficulty : 'normal';
     const code = genCode();
     rooms[code] = createRoom(code);
     rooms[code].players[socket.id] = {
-      name, uid, side: 'left', streak: 0, score: 0
+      name, uid, char, side: 'left', streak: 0, score: 0
     };
     addBot(rooms[code], preset);
     socket.join(code);
@@ -488,11 +489,11 @@ io.on('connection', (socket) => {
   });
 
   // ── Create Private Room ──
-  socket.on('create-room', ({ name, uid }, cb) => {
+  socket.on('create-room', ({ name, uid, char }, cb) => {
     const code = genCode();
     rooms[code] = createRoom(code);
     rooms[code].players[socket.id] = {
-      name, uid, side: 'left', streak: 0, score: 0
+      name, uid, char, side: 'left', streak: 0, score: 0
     };
     socket.join(code);
     currentRoom = code;
@@ -501,14 +502,14 @@ io.on('connection', (socket) => {
   });
 
   // ── Join Private Room ──
-  socket.on('join-room', ({ code, name, uid }, cb) => {
+  socket.on('join-room', ({ code, name, uid, char }, cb) => {
     const room = rooms[code];
     if (!room) return cb({ ok: false, error: 'Sala no encontrada' });
     if (getPlayerCount(room) >= 2) return cb({ ok: false, error: 'Sala llena' });
     if (room.state !== 'waiting') return cb({ ok: false, error: 'Partida en curso' });
 
     room.players[socket.id] = {
-      name, uid, side: 'right', streak: 0, score: 0
+      name, uid, char, side: 'right', streak: 0, score: 0
     };
     socket.join(code);
     currentRoom = code;
