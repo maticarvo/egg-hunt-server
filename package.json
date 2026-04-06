@@ -1,7 +1,6 @@
 {
-  "name": "egg-hunt-server",
+  "name": "math-tug-server",
   "version": "1.0.0",
-  "description": "Easter Egg Hunt multiplayer server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
