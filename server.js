@@ -32,6 +32,13 @@ const ROUND_TIME = 60;        // segundos por ronda
 const PROBLEMS_POOL = 4;      // opciones por problema
 const STREAK_THRESHOLD = 3;   // racha para bonus
 
+// Bot difficulty presets: { accuracy, minDelay, maxDelay } (ms)
+const BOT_PRESETS = {
+  facil:    { accuracy: 0.55, minDelay: 3500, maxDelay: 6000, name: 'Bot Fácil' },
+  normal:   { accuracy: 0.75, minDelay: 2200, maxDelay: 4500, name: 'Bot Normal' },
+  dificil:  { accuracy: 0.90, minDelay: 1400, maxDelay: 3000, name: 'Bot Difícil' },
+};
+
 // ══════════════════════════════════════════════
 // PROBLEM GENERATION
 // ══════════════════════════════════════════════
@@ -201,6 +208,7 @@ function checkRoundEnd(room) {
 function endRound(room, winner) {
   clearInterval(room.timer);
   room.timer = null;
+  stopBot(room);
 
   // Si se acabó el tiempo sin ganador, gana quien tenga la cuerda más cerca
   if (!winner) {
@@ -249,6 +257,11 @@ function startRound(room) {
 
   broadcastState(room);
 
+  // Start bot loop if there's a bot
+  if (room.botId && room.players[room.botId]) {
+    startBotLoop(room);
+  }
+
   // Start round timer
   room.timer = setInterval(() => {
     room.timeLeft--;
@@ -294,7 +307,108 @@ function cleanupRoom(code) {
   if (!room) return;
   if (room.timer) clearInterval(room.timer);
   if (room.countdownTimer) clearInterval(room.countdownTimer);
+  stopBot(room);
   delete rooms[code];
+}
+
+// ══════════════════════════════════════════════
+// BOT LOGIC
+// ══════════════════════════════════════════════
+
+function addBot(room, preset) {
+  const botId = 'bot_' + genCode();
+  const cfg = BOT_PRESETS[preset] || BOT_PRESETS.normal;
+  room.players[botId] = {
+    name: cfg.name,
+    uid: botId,
+    side: 'right',
+    streak: 0,
+    score: 0,
+    isBot: true,
+    botCfg: cfg
+  };
+  room.botId = botId;
+  return botId;
+}
+
+function startBotLoop(room) {
+  if (!room.botId) return;
+  const botId = room.botId;
+  const player = room.players[botId];
+  if (!player) return;
+  const cfg = player.botCfg;
+
+  function botTick() {
+    if (!rooms[room.code]) return;
+    if (room.state !== 'playing') return;
+    if (!room.players[botId]) return;
+
+    const problem = room.currentProblems[botId];
+    if (!problem) return;
+
+    const delay = randInt(cfg.minDelay, cfg.maxDelay);
+
+    room.botTimeout = setTimeout(() => {
+      if (!rooms[room.code] || room.state !== 'playing') return;
+      if (!room.players[botId]) return;
+
+      const correct = Math.random() < cfg.accuracy;
+      let answer;
+
+      if (correct) {
+        answer = problem.answer;
+      } else {
+        // Pick a wrong option
+        const wrongs = problem.options.filter(o => o !== problem.answer);
+        answer = wrongs[randInt(0, wrongs.length - 1)];
+      }
+
+      // Process the bot's answer (same logic as player answer)
+      const p = room.players[botId];
+      if (!p) return;
+
+      if (answer === problem.answer) {
+        p.streak++;
+        p.score++;
+        const pull = p.streak >= STREAK_THRESHOLD ? PULL_BONUS : PULL_NORMAL;
+        if (p.side === 'left') room.ropePos -= pull;
+        else room.ropePos += pull;
+        room.ropePos = Math.max(-ROPE_MAX, Math.min(ROPE_MAX, room.ropePos));
+
+        io.to(room.code).emit('pull', {
+          side: p.side, amount: pull, streak: p.streak, playerName: p.name
+        });
+
+        if (!checkRoundEnd(room)) {
+          assignNewProblem(room, botId);
+          broadcastState(room);
+          botTick();
+        }
+      } else {
+        p.streak = 0;
+        if (p.side === 'left') room.ropePos += WRONG_PENALTY;
+        else room.ropePos -= WRONG_PENALTY;
+        room.ropePos = Math.max(-ROPE_MAX, Math.min(ROPE_MAX, room.ropePos));
+
+        io.to(room.code).emit('wrong', { side: p.side, playerName: p.name });
+
+        if (!checkRoundEnd(room)) {
+          assignNewProblem(room, botId);
+          broadcastState(room);
+          botTick();
+        }
+      }
+    }, delay);
+  }
+
+  botTick();
+}
+
+function stopBot(room) {
+  if (room.botTimeout) {
+    clearTimeout(room.botTimeout);
+    room.botTimeout = null;
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -336,6 +450,21 @@ io.on('connection', (socket) => {
     queue.push({ socket, code });
     cb({ ok: true, code, side: 'left', waiting: true });
     broadcastState(rooms[code]);
+  });
+
+  // ── Play vs Bot ──
+  socket.on('play-bot', ({ name, uid, difficulty }, cb) => {
+    const preset = BOT_PRESETS[difficulty] ? difficulty : 'normal';
+    const code = genCode();
+    rooms[code] = createRoom(code);
+    rooms[code].players[socket.id] = {
+      name, uid, side: 'left', streak: 0, score: 0
+    };
+    addBot(rooms[code], preset);
+    socket.join(code);
+    currentRoom = code;
+    cb({ ok: true, code, side: 'left' });
+    startMatch(rooms[code]);
   });
 
   // ── Create Private Room ──
@@ -478,7 +607,10 @@ io.on('connection', (socket) => {
     delete room.currentProblems[sock.id];
     sock.leave(currentRoom);
 
-    if (getPlayerCount(room) === 0) {
+    // Count remaining human players
+    const humans = Object.values(room.players).filter(p => !p.isBot).length;
+
+    if (humans === 0) {
       cleanupRoom(currentRoom);
     } else {
       // If game was playing, other player wins
