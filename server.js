@@ -421,35 +421,55 @@ io.on('connection', (socket) => {
   // ── Quick Match ──
   socket.on('quick-match', ({ name, uid }, cb) => {
     // Check if someone is waiting
+    const skipped = [];
+    let matched = false;
+
     while (queue.length > 0) {
       const waiting = queue.shift();
-      if (waiting.socket.connected && rooms[waiting.code]) {
-        // Join their room
-        const room = rooms[waiting.code];
-        room.players[socket.id] = {
-          name, uid, side: 'right', streak: 0, score: 0
-        };
-        socket.join(waiting.code);
-        currentRoom = waiting.code;
-        cb({ ok: true, code: waiting.code, side: 'right' });
 
-        // Start the match!
-        startMatch(room);
-        return;
+      // Skip disconnected or destroyed rooms
+      if (!waiting.socket.connected || !rooms[waiting.code]) continue;
+
+      // Skip self (same uid = same user in another tab/session)
+      if (waiting.uid === uid && uid) {
+        // Clean up the stale room
+        cleanupRoom(waiting.code);
+        continue;
       }
+
+      // Valid match found
+      const room = rooms[waiting.code];
+      room.players[socket.id] = {
+        name, uid, side: 'right', streak: 0, score: 0
+      };
+      socket.join(waiting.code);
+      currentRoom = waiting.code;
+      cb({ ok: true, code: waiting.code, side: 'right' });
+
+      // Re-add any skipped entries
+      queue.unshift(...skipped);
+
+      startMatch(room);
+      matched = true;
+      break;
     }
 
-    // No one waiting → create room and queue
-    const code = genCode();
-    rooms[code] = createRoom(code);
-    rooms[code].players[socket.id] = {
-      name, uid, side: 'left', streak: 0, score: 0
-    };
-    socket.join(code);
-    currentRoom = code;
-    queue.push({ socket, code });
-    cb({ ok: true, code, side: 'left', waiting: true });
-    broadcastState(rooms[code]);
+    if (!matched) {
+      // Re-add skipped entries
+      queue.unshift(...skipped);
+
+      // No one waiting → create room and queue
+      const code = genCode();
+      rooms[code] = createRoom(code);
+      rooms[code].players[socket.id] = {
+        name, uid, side: 'left', streak: 0, score: 0
+      };
+      socket.join(code);
+      currentRoom = code;
+      queue.push({ socket, code, uid });
+      cb({ ok: true, code, side: 'left', waiting: true });
+      broadcastState(rooms[code]);
+    }
   });
 
   // ── Play vs Bot ──
